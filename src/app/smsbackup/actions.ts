@@ -98,7 +98,7 @@ async function handleSearch(formData: FormData): Promise<BackupState> {
     .from("tickets")
     .select("*")
     .in("venue_id", venueIds)
-    .in("status", ["pending_activation", "active", "partially_collected"])
+    .in("status", ["pending_activation", "active", "partially_collected", "forgotten"])
     .order("created_at", { ascending: false })
     .limit(50);
 

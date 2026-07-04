@@ -16,7 +16,7 @@ export type Database = {
       scan_result: "accepted" | "rejected";
       scan_type: "activation" | "checkout" | "rejected";
       slot_status: "available" | "occupied" | "blocked";
-      ticket_status: "pending_activation" | "active" | "partially_collected" | "collected" | "cancelled" | "expired";
+      ticket_status: "pending_activation" | "active" | "partially_collected" | "collected" | "forgotten" | "cancelled" | "expired";
       venue_approval_status: "pending" | "approved" | "rejected" | "suspended";
       venue_staff_role: "staff" | "manager";
     };
@@ -131,6 +131,7 @@ export type Database = {
           capacity_estimate: string | null;
           contact_email: string;
           contact_name: string;
+          country: string | null;
           created_at: string;
           id: string;
           message: string | null;
@@ -140,6 +141,7 @@ export type Database = {
           capacity_estimate?: string | null;
           contact_email: string;
           contact_name: string;
+          country?: string | null;
           created_at?: string;
           id?: string;
           message?: string | null;
@@ -149,6 +151,7 @@ export type Database = {
           capacity_estimate?: string | null;
           contact_email?: string;
           contact_name?: string;
+          country?: string | null;
           created_at?: string;
           id?: string;
           message?: string | null;
@@ -159,28 +162,40 @@ export type Database = {
       guest_contacts: {
         Row: {
           created_at: string;
+          date_of_birth: string | null;
           email: string;
           email_normalized: string;
           full_name: string;
+          gender: string | null;
           id: string;
+          member_since: string | null;
+          membership_token_hash: string | null;
           phone: string;
           updated_at: string;
         };
         Insert: {
           created_at?: string;
+          date_of_birth?: string | null;
           email: string;
           email_normalized: string;
           full_name: string;
+          gender?: string | null;
           id?: string;
+          member_since?: string | null;
+          membership_token_hash?: string | null;
           phone: string;
           updated_at?: string;
         };
         Update: {
           created_at?: string;
+          date_of_birth?: string | null;
           email?: string;
           email_normalized?: string;
           full_name?: string;
+          gender?: string | null;
           id?: string;
+          member_since?: string | null;
+          membership_token_hash?: string | null;
           phone?: string;
           updated_at?: string;
         };
@@ -245,6 +260,60 @@ export type Database = {
           scan_type?: Database["public"]["Enums"]["scan_type"];
           scanned_by?: string | null;
           ticket_id?: string;
+          venue_id?: string;
+        };
+        Relationships: [];
+      };
+      ticket_contacts: {
+        Row: {
+          channel: "email" | "whatsapp";
+          contacted_by: string | null;
+          created_at: string;
+          id: string;
+          ticket_id: string;
+        };
+        Insert: {
+          channel: "email" | "whatsapp";
+          contacted_by?: string | null;
+          created_at?: string;
+          id?: string;
+          ticket_id: string;
+        };
+        Update: {
+          channel?: "email" | "whatsapp";
+          contacted_by?: string | null;
+          created_at?: string;
+          id?: string;
+          ticket_id?: string;
+        };
+        Relationships: [];
+      };
+      venue_contacts: {
+        Row: {
+          contacted_by: string | null;
+          created_at: string;
+          id: string;
+          message: string;
+          subject: string;
+          template: "billing_followup" | "cancellation_followup" | "custom";
+          venue_id: string;
+        };
+        Insert: {
+          contacted_by?: string | null;
+          created_at?: string;
+          id?: string;
+          message: string;
+          subject: string;
+          template: "billing_followup" | "cancellation_followup" | "custom";
+          venue_id: string;
+        };
+        Update: {
+          contacted_by?: string | null;
+          created_at?: string;
+          id?: string;
+          message?: string;
+          subject?: string;
+          template?: "billing_followup" | "cancellation_followup" | "custom";
           venue_id?: string;
         };
         Relationships: [];
@@ -316,8 +385,11 @@ export type Database = {
         Row: {
           active: boolean;
           address: string | null;
+          billing_cadence: "monthly" | "annual";
           billing_plan: Database["public"]["Enums"]["billing_plan"] | null;
           billing_status: Database["public"]["Enums"]["billing_status"];
+          cancellation_pay_remainder: boolean;
+          cancellation_requested_at: string | null;
           capacity: number;
           hanger_capacity: number;
           bag_capacity: number;
@@ -337,14 +409,18 @@ export type Database = {
           stripe_customer_id: string | null;
           stripe_price_id: string | null;
           stripe_subscription_id: string | null;
+          subscription_ends_at: string | null;
           ticket_expiry_hours: number | null;
           updated_at: string;
         };
         Insert: {
           active?: boolean;
           address?: string | null;
+          billing_cadence?: "monthly" | "annual";
           billing_plan?: Database["public"]["Enums"]["billing_plan"] | null;
           billing_status?: Database["public"]["Enums"]["billing_status"];
+          cancellation_pay_remainder?: boolean;
+          cancellation_requested_at?: string | null;
           capacity?: number;
           hanger_capacity?: number;
           bag_capacity?: number;
@@ -364,14 +440,18 @@ export type Database = {
           stripe_customer_id?: string | null;
           stripe_price_id?: string | null;
           stripe_subscription_id?: string | null;
+          subscription_ends_at?: string | null;
           ticket_expiry_hours?: number | null;
           updated_at?: string;
         };
         Update: {
           active?: boolean;
           address?: string | null;
+          billing_cadence?: "monthly" | "annual";
           billing_plan?: Database["public"]["Enums"]["billing_plan"] | null;
           billing_status?: Database["public"]["Enums"]["billing_status"];
+          cancellation_pay_remainder?: boolean;
+          cancellation_requested_at?: string | null;
           capacity?: number;
           hanger_capacity?: number;
           bag_capacity?: number;
@@ -391,6 +471,7 @@ export type Database = {
           stripe_customer_id?: string | null;
           stripe_price_id?: string | null;
           stripe_subscription_id?: string | null;
+          subscription_ends_at?: string | null;
           ticket_expiry_hours?: number | null;
           updated_at?: string;
         };

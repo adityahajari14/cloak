@@ -61,13 +61,19 @@ export async function ticketReadyState(
     };
   }
 
-  if (ticket.status === "active" || ticket.status === "partially_collected") {
+  if (
+    ticket.status === "active" ||
+    ticket.status === "partially_collected" ||
+    ticket.status === "forgotten"
+  ) {
     return {
       intent: "checkout",
       message:
-        ticket.status === "partially_collected"
-          ? "Some items already returned. Select items to return or add more."
-          : "Ticket found. Select items to return, or add more items.",
+        ticket.status === "forgotten"
+          ? "This event ended before the guest collected their items. Select items to return."
+          : ticket.status === "partially_collected"
+            ? "Some items already returned. Select items to return or add more."
+            : "Ticket found. Select items to return, or add more items.",
       status: "ready",
       ticket: scannerTicket,
     };
@@ -298,7 +304,11 @@ export async function performAddItems(
     return { message: "Ticket could not be verified for this venue.", status: "error" };
   }
 
-  if (ticket.status !== "active" && ticket.status !== "partially_collected") {
+  if (
+    ticket.status !== "active" &&
+    ticket.status !== "partially_collected" &&
+    ticket.status !== "forgotten"
+  ) {
     return ticketReadyState(context, ticket);
   }
 
@@ -409,7 +419,11 @@ export async function performCheckout(
     return { message: "This ticket is no longer valid.", status: "error" };
   }
 
-  if (ticket.status !== "active" && ticket.status !== "partially_collected") {
+  if (
+    ticket.status !== "active" &&
+    ticket.status !== "partially_collected" &&
+    ticket.status !== "forgotten"
+  ) {
     return ticketReadyState(context, ticket);
   }
 
@@ -443,8 +457,9 @@ export async function performCheckout(
       item_count: remainingOpen.reduce((s, i) => s + i.quantity, 0) || ticket.item_count,
       status: fullyCollected ? "collected" : "partially_collected",
       // Keep storage_location for history. The slot is freed by the status
-      // change alone — slot assignment only counts active/partially_collected
-      // tickets, so a collected ticket no longer occupies it.
+      // change alone — slot assignment only counts occupying statuses
+      // (active/partially_collected/forgotten), so a collected ticket no
+      // longer occupies it.
       storage_location: ticket.storage_location,
     })
     .eq("id", ticket.id)

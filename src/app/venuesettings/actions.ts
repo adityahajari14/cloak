@@ -7,6 +7,7 @@ import { requireVenueAccess } from "@/lib/auth/guards";
 import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { isValidEmail } from "@/lib/validation";
+import { planCancellation } from "@/lib/billing";
 
 function readField(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
@@ -291,6 +292,137 @@ export async function updateVenueExpiry(formData: FormData) {
 
   revalidatePath("/venuesettings");
   finish(enabled ? `Tickets now expire after ${ticketExpiryHours} hours.` : "Ticket expiry disabled.", venueId);
+}
+
+// ─── Subscription cancellation ─────────────────────────────────────────────────
+
+export type CancellationPreview = {
+  effectiveEndDate: string;
+  message: string;
+  withinFirstYear: boolean;
+  canPayRemainder: boolean;
+  remainingMonthlyCharges: number;
+  remainderAmount: number | null;
+};
+
+async function loadVenueForCancellation(venueId: string) {
+  const supabase = createAdminClient();
+  const { data } = await supabase
+    .from("venues")
+    .select("id, created_at, billing_cadence, billing_plan, cancellation_requested_at, subscription_ends_at")
+    .eq("id", venueId)
+    .maybeSingle();
+  return data;
+}
+
+/** Compute the cancellation outcome for the manager to review before confirming. */
+export async function previewVenueCancellation(venueId: string): Promise<CancellationPreview | { error: string }> {
+  const guard = await requireVenueAccess("/venuesettings", ["manager"]);
+  if (guard.status !== "authorized" || !isSupabaseAdminConfigured()) {
+    return { error: "Cancellation is temporarily unavailable." };
+  }
+  if (!venueId || !guard.venueRoles.some((r) => r.venueId === venueId && r.role === "manager")) {
+    return { error: "No managed venue was found for this account." };
+  }
+
+  const venue = await loadVenueForCancellation(venueId);
+  if (!venue) return { error: "Venue not found." };
+
+  const { MONTHLY_PLAN_PRICES } = await import("@/lib/venues");
+  const { formatCancellationMessage } = await import("@/lib/billing");
+
+  const plan = planCancellation({
+    cadence: venue.billing_cadence,
+    signupDate: new Date(venue.created_at),
+  });
+
+  const monthlyPrice = venue.billing_plan ? MONTHLY_PLAN_PRICES[venue.billing_plan] : undefined;
+  const remainderAmount =
+    plan.canPayRemainder && monthlyPrice ? monthlyPrice * plan.remainingMonthlyCharges : null;
+
+  return {
+    canPayRemainder: plan.canPayRemainder,
+    effectiveEndDate: plan.effectiveEndDate.toISOString(),
+    message: formatCancellationMessage(plan, venue.billing_cadence),
+    remainderAmount,
+    remainingMonthlyCharges: plan.remainingMonthlyCharges,
+    withinFirstYear: plan.withinFirstYear,
+  };
+}
+
+/**
+ * Confirm cancellation. Records the scheduled end date and (for the pay-now
+ * path) that the manager opted to pay the remaining balance up front. No real
+ * charge or subscription cancellation happens yet — Stripe isn't wired up, so
+ * this only updates our own records; a future job/webhook will need to action
+ * subscription_ends_at against the real payment processor.
+ */
+export async function confirmVenueCancellation(
+  venueId: string,
+  payRemainderNow: boolean,
+): Promise<{ ok: boolean; error?: string }> {
+  const guard = await requireVenueAccess("/venuesettings", ["manager"]);
+  if (guard.status !== "authorized" || !isSupabaseAdminConfigured()) {
+    return { ok: false, error: "Cancellation is temporarily unavailable." };
+  }
+  if (!venueId || !guard.venueRoles.some((r) => r.venueId === venueId && r.role === "manager")) {
+    return { ok: false, error: "No managed venue was found for this account." };
+  }
+
+  const venue = await loadVenueForCancellation(venueId);
+  if (!venue) return { ok: false, error: "Venue not found." };
+
+  const plan = planCancellation({
+    cadence: venue.billing_cadence,
+    signupDate: new Date(venue.created_at),
+  });
+
+  // Paying the remainder now stops service immediately instead of waiting
+  // for the 1-year anniversary — only meaningful within the first year on a
+  // monthly plan.
+  const effectiveEndDate =
+    payRemainderNow && plan.canPayRemainder ? new Date() : plan.effectiveEndDate;
+
+  const supabase = createAdminClient();
+  const { error } = await supabase
+    .from("venues")
+    .update({
+      cancellation_pay_remainder: payRemainderNow && plan.canPayRemainder,
+      cancellation_requested_at: new Date().toISOString(),
+      subscription_ends_at: effectiveEndDate.toISOString(),
+    })
+    .eq("id", venueId);
+
+  if (error) return { ok: false, error: "Could not process cancellation. Please try again." };
+
+  revalidatePath("/venuesettings");
+  return { ok: true };
+}
+
+/** Undo a pending cancellation request — venue continues as normal. */
+export async function resumeVenueSubscription(venueId: string): Promise<{ ok: boolean; error?: string }> {
+  const guard = await requireVenueAccess("/venuesettings", ["manager"]);
+  if (guard.status !== "authorized" || !isSupabaseAdminConfigured()) {
+    return { ok: false, error: "This action is temporarily unavailable." };
+  }
+  if (!venueId || !guard.venueRoles.some((r) => r.venueId === venueId && r.role === "manager")) {
+    return { ok: false, error: "No managed venue was found for this account." };
+  }
+
+  const supabase = createAdminClient();
+  const { error } = await supabase
+    .from("venues")
+    .update({
+      cancellation_pay_remainder: false,
+      cancellation_requested_at: null,
+      subscription_ends_at: null,
+    })
+    .eq("id", venueId);
+
+  if (error) return { ok: false, error: "Could not resume subscription. Please try again." };
+
+  revalidatePath("/venuesettings");
+  return { ok: true };
 }
 
 // ─── Regenerate venue QR slug ─────────────────────────────────────────────────

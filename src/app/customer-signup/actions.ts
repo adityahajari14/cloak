@@ -127,6 +127,7 @@ export async function createGuestTicket(formData: FormData) {
       to: email,
       subject: `Your Cloak pass for ${resolvedVenueName}`,
       react: GuestTicketEmail({
+        cloakClubUrl: `${getSiteUrl()}/cloak-club`,
         expiresAt: expiresAt,
         guestName: fullName,
         publicCode,

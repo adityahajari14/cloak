@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { createGuestTicket } from "@/app/customer-signup/actions";
 import SubmitButton from "@/components/shared/SubmitButton";
 import PhoneInput from "@/components/shared/PhoneInput";
@@ -169,6 +170,27 @@ export default function GuestFormPreview({
           Your details are used only to create a cloakroom pass for this visit.
         </p>
       </form>
+
+      {/* Cloak Club upsell — permanent pass for any venue */}
+      <Link
+        className="mt-4 flex items-center gap-3 rounded-xl border border-line bg-zinc-50 px-4 py-3 transition hover:border-foreground/30 hover:bg-white"
+        href="/cloak-club"
+      >
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-base">
+          ✨
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold text-foreground">
+            Want a pass for every visit?
+          </span>
+          <span className="block text-xs text-muted">
+            Join Cloak Club free — one permanent wallet pass for any venue.
+          </span>
+        </span>
+        <svg className="h-4 w-4 shrink-0 text-muted" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <path d="M9 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </Link>
     </div>
   );
 }

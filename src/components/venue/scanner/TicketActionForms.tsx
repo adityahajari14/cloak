@@ -29,6 +29,7 @@ export function GuestCard({ ticket }: { ticket: ScannerTicket }) {
   const isPending = ticket.status === "pending_activation";
   const isStored = ticket.status === "active";
   const isPartial = ticket.status === "partially_collected";
+  const isForgotten = ticket.status === "forgotten";
 
   return (
     <div className="rounded-xl border border-line bg-panel p-4">
@@ -46,9 +47,14 @@ export function GuestCard({ ticket }: { ticket: ScannerTicket }) {
                 : "bg-red-50 text-red-700"
           }`}
         >
-          {isStored ? "Stored" : isPartial ? "Partial" : isPending ? "Pending" : ticket.status}
+          {isStored ? "Stored" : isPartial ? "Partial" : isPending ? "Pending" : isForgotten ? "Forgotten" : ticket.status}
         </span>
       </div>
+      {isForgotten ? (
+        <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700">
+          Event ended before collection — items are still stored.
+        </p>
+      ) : null}
       <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted">
         <span>{ticket.guestPhone}</span>
         <span>{ticket.venueName}</span>

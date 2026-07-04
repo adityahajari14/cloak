@@ -8,11 +8,17 @@ import Panel from "@/components/shared/Panel";
 import StatusPill, { type StatusTone } from "@/components/shared/StatusPill";
 import { PrimaryLink, SecondaryLink } from "@/components/shared/ButtonLink";
 import type { VenueTicketDetail } from "@/lib/venue-dashboard";
-import { collectItemsFromDetail } from "@/app/venueticketdetail/actions";
+import {
+  collectItemsFromDetail,
+  contactGuestAboutForgottenTicket,
+  type ContactChannel,
+  type TicketContactLogEntry,
+} from "@/app/venueticketdetail/actions";
 
 function formatStatus(status: VenueTicketDetail["status"]) {
   if (status === "pending_activation") return "Pending activation";
   if (status === "partially_collected") return "Partially collected";
+  if (status === "forgotten") return "Forgotten";
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
@@ -20,6 +26,7 @@ function statusTone(status: VenueTicketDetail["status"]): StatusTone {
   if (status === "active" || status === "partially_collected") return "green";
   if (status === "pending_activation") return "warning";
   if (status === "collected") return "neutral";
+  if (status === "forgotten") return "danger";
   return "danger";
 }
 
@@ -28,7 +35,13 @@ function formatDate(value: string | null) {
   return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
-export default function VenueTicketDetailPage({ ticket }: { ticket: VenueTicketDetail | null }) {
+export default function VenueTicketDetailPage({
+  contactLog,
+  ticket,
+}: {
+  contactLog: TicketContactLogEntry[];
+  ticket: VenueTicketDetail | null;
+}) {
   const router = useRouter();
 
   if (!ticket) {
@@ -81,6 +94,10 @@ export default function VenueTicketDetailPage({ ticket }: { ticket: VenueTicketD
           </div>
         </Panel>
 
+        {ticket.status === "forgotten" ? (
+          <ContactCustomerPanel contactLog={contactLog} ticket={ticket} />
+        ) : null}
+
         <ItemsPanel ticket={ticket} onFullCheckout={() => router.push("/venuedashboard")} />
 
         <Panel title="Timeline">
@@ -90,6 +107,83 @@ export default function VenueTicketDetailPage({ ticket }: { ticket: VenueTicketD
         </Panel>
       </div>
     </PageShell>
+  );
+}
+
+function formatContactDate(iso: string): string {
+  return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso));
+}
+
+function ContactCustomerPanel({
+  contactLog,
+  ticket,
+}: {
+  contactLog: TicketContactLogEntry[];
+  ticket: VenueTicketDetail;
+}) {
+  const [sending, setSending] = useState<ContactChannel | null>(null);
+  const [log, setLog] = useState(contactLog);
+  const [error, setError] = useState("");
+
+  async function handleContact(channel: ContactChannel) {
+    setError("");
+    setSending(channel);
+    try {
+      const result = await contactGuestAboutForgottenTicket(ticket.id, channel);
+      if (result.ok) {
+        setLog((prev) => [{ channel, createdAt: new Date().toISOString(), id: crypto.randomUUID() }, ...prev]);
+      } else {
+        setError(
+          channel === "email"
+            ? "Could not send email — the guest may not have provided an email address."
+            : "Could not send WhatsApp message. Please try again.",
+        );
+      }
+    } finally {
+      setSending(null);
+    }
+  }
+
+  const lastEmail = log.find((c) => c.channel === "email");
+  const lastWhatsapp = log.find((c) => c.channel === "whatsapp");
+
+  return (
+    <Panel title="Contact customer">
+      <p className="mb-4 text-sm text-muted">
+        This event ended before the guest collected their items. Let them know their items are
+        still waiting.
+      </p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <button
+          className="rounded-xl border border-line bg-white px-4 py-2.5 text-sm font-medium text-foreground transition hover:bg-zinc-50 disabled:opacity-50"
+          disabled={sending !== null || !ticket.guestEmail}
+          onClick={() => handleContact("email")}
+          type="button"
+        >
+          {sending === "email" ? "Sending…" : lastEmail ? "Resend email" : "Send email"}
+        </button>
+        <button
+          className="rounded-xl border border-line bg-white px-4 py-2.5 text-sm font-medium text-foreground transition hover:bg-zinc-50 disabled:opacity-50"
+          disabled={sending !== null}
+          onClick={() => handleContact("whatsapp")}
+          type="button"
+        >
+          {sending === "whatsapp" ? "Sending…" : lastWhatsapp ? "Resend WhatsApp" : "Send WhatsApp"}
+        </button>
+      </div>
+
+      {error ? <p className="mt-3 text-xs font-medium text-red-600">{error}</p> : null}
+
+      {log.length > 0 ? (
+        <div className="mt-4 space-y-1.5 border-t border-line pt-3">
+          {log.map((c) => (
+            <p className="text-xs text-muted" key={c.id}>
+              {c.channel === "email" ? "Emailed" : "WhatsApp sent"} — {formatContactDate(c.createdAt)}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </Panel>
   );
 }
 
@@ -103,7 +197,9 @@ function ItemsPanel({
   const openItems = ticket.items.filter((i) => !i.collectedAt);
   const collectedItems = ticket.items.filter((i) => i.collectedAt);
   const canCollect =
-    ticket.status === "active" || ticket.status === "partially_collected";
+    ticket.status === "active" ||
+    ticket.status === "partially_collected" ||
+    ticket.status === "forgotten";
 
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(openItems.map((i) => i.id)),

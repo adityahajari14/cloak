@@ -8,8 +8,6 @@ const STYLE_URL = `https://api.maptiler.com/maps/streets-v2/style.json?key=${MAP
 
 const STATUS_COLOR: Record<AdminVenueReview["status"], string> = {
   approved: "#10b981",
-  pending: "#f59e0b",
-  rejected: "#ef4444",
   suspended: "#71717a",
 };
 
@@ -106,7 +104,7 @@ export default function VenueMapPanel({ venues }: { venues: AdminVenueReview[] }
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {(["approved", "pending", "suspended", "rejected"] as const).map((s) => (
+          {(["approved", "suspended"] as const).map((s) => (
             <span className="flex items-center gap-1.5 text-xs text-muted" key={s}>
               <span
                 className="h-2.5 w-2.5 rounded-full border border-white/50"

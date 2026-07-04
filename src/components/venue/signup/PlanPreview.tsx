@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { selectVenuePlan } from "@/app/venuesignup/actions";
-import { venuePlans } from "@/lib/venues";
+import { MONTHLY_PLAN_PRICES, venuePlans, type VenuePlanId } from "@/lib/venues";
 import { useFormStatus } from "react-dom";
 
 function PlanButton() {
@@ -25,14 +25,8 @@ const checkIcon = (
   </svg>
 );
 
-// Monthly prices in pence to avoid float arithmetic
-const MONTHLY_PRICES: Record<string, number> = {
-  starter: 49,
-  professional: 149,
-};
-
-function planPrice(planId: string, annual: boolean): { main: string; sub: string | null } {
-  const monthly = MONTHLY_PRICES[planId];
+function planPrice(planId: VenuePlanId, annual: boolean): { main: string; sub: string | null } {
+  const monthly = MONTHLY_PLAN_PRICES[planId];
 
   // Per-event plan is not a subscription — no annual toggle
   if (monthly === undefined) {
@@ -141,6 +135,11 @@ export default function PlanPreview({ error }: { error?: string }) {
               )}
               <form action={selectVenuePlan} className="mt-auto">
                 <input name="plan" type="hidden" value={plan.id} />
+                <input
+                  name="billingCadence"
+                  type="hidden"
+                  value={plan.id === "per_event" ? "monthly" : annual ? "annual" : "monthly"}
+                />
                 <PlanButton />
               </form>
             </div>

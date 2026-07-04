@@ -145,3 +145,32 @@ export async function sendWhatsAppItemsCollected({
     },
   ]);
 }
+
+/**
+ * Sent when staff manually follow up on a forgotten ticket — items still
+ * stored after the event ended without the guest collecting them.
+ * Template: cloak_items_forgotten
+ * Body variables: {{1}} guest name, {{2}} venue name, {{3}} pass code
+ */
+export async function sendWhatsAppItemsForgotten({
+  phone,
+  guestName,
+  venueName,
+  publicCode,
+}: {
+  phone: string;
+  guestName: string;
+  venueName: string;
+  publicCode: string;
+}): Promise<void> {
+  await sendTemplate(phone, "cloak_items_forgotten", [
+    {
+      type: "body",
+      parameters: [
+        { type: "text", text: guestName },
+        { type: "text", text: venueName },
+        { type: "text", text: publicCode },
+      ],
+    },
+  ]);
+}

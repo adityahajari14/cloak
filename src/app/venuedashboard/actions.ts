@@ -24,13 +24,16 @@ export async function endEvent(eventId: string): Promise<void> {
     .eq("id", eventId)
     .in("venue_id", allowedVenueIds);
 
-  // Mark all pending tickets for this event as expired (set expires_at to now)
-  // so they appear as "forgotten"
+  // Mark every ticket on this event that never made it to "collected" as
+  // forgotten — whether it was never activated, still fully stored, or only
+  // partially returned. Items may still be sitting in the cloakroom; staff
+  // can still check them out normally, "forgotten" just flags that the event
+  // ended without the guest coming back for them.
   await supabase
     .from("tickets")
-    .update({ expires_at: new Date().toISOString() })
+    .update({ status: "forgotten" })
     .eq("event_id", eventId)
-    .eq("status", "pending_activation")
+    .in("status", ["pending_activation", "active", "partially_collected"])
     .in("venue_id", allowedVenueIds);
 
   revalidatePath("/venuedashboard");

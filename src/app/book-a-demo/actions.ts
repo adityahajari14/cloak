@@ -11,6 +11,7 @@ export async function submitDemoRequest(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const phone = String(formData.get("phone") ?? "").trim();
   const capacity = String(formData.get("capacity") ?? "").trim();
+  const country = String(formData.get("country") ?? "").trim() || "United Kingdom";
   const preferredDate = String(formData.get("preferredDate") ?? "").trim();
   const preferredTime = String(formData.get("preferredTime") ?? "").trim();
   const message = String(formData.get("message") ?? "").trim();
@@ -31,6 +32,7 @@ export async function submitDemoRequest(formData: FormData) {
       capacity_estimate: capacity || null,
       contact_email: email,
       contact_name: contactName,
+      country,
       message: fullMessage || null,
       venue_name: venueName,
     });

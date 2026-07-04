@@ -22,7 +22,7 @@ export type TicketView = {
   items: PublicTicketItem[];
   mobile: string;
   qrValue: string;
-  status?: "pending_activation" | "active" | "partially_collected" | "collected" | "cancelled" | "expired";
+  status?: "pending_activation" | "active" | "partially_collected" | "collected" | "forgotten" | "cancelled" | "expired";
   storageLocation: string | null;
   ticketId: string;
   venueAddress: string | null;
@@ -38,6 +38,9 @@ function StatusPill({ status }: { status: TicketView["status"] }) {
     pending_activation:    { label: "Awaiting activation", cls: "bg-amber-50 text-amber-700 border-amber-200" },
     active:                { label: "Items stored",        cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
     partially_collected:   { label: "Partially collected", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+    // Guests see a forgotten ticket the same as an active one — the items are
+    // still safely stored, "forgotten" is only a staff-facing operational flag.
+    forgotten:             { label: "Items stored",        cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
     collected:             { label: "Collected",           cls: "bg-zinc-100 text-zinc-500 border-zinc-200" },
     cancelled:          { label: "Cancelled",            cls: "bg-red-50 text-red-600 border-red-200" },
     expired:            { label: "Expired",              cls: "bg-red-50 text-red-600 border-red-200" },
@@ -125,7 +128,9 @@ export default function TicketPage({
 
   const { user, openAuthModal } = useAuth();
 
-  const isActive = ticket.status === "active";
+  // Guests see a forgotten ticket exactly like an active one — the items are
+  // still stored, "forgotten" is a staff-only operational flag.
+  const isActive = ticket.status === "active" || ticket.status === "forgotten";
   const isCollected = ticket.status === "collected";
   const isExpired = ticket.status === "expired";
   const isCancelled = ticket.status === "cancelled";
@@ -227,6 +232,29 @@ export default function TicketPage({
 
 
         <TicketDetails ticket={ticket} />
+
+        {/* Cloak Club upsell — permanent pass for any venue */}
+        {!isClosed && (
+          <Link
+            className="flex items-center gap-3 rounded-xl border border-line bg-panel px-4 py-3.5 transition hover:border-foreground/30 hover:bg-zinc-50"
+            href="/cloak-club"
+          >
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-lg">
+              ✨
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold text-foreground">
+                Get a lifetime Cloak pass
+              </span>
+              <span className="block text-xs text-muted">
+                One wallet pass for every venue — join Cloak Club free.
+              </span>
+            </span>
+            <svg className="h-4 w-4 shrink-0 text-muted" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path d="M9 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </Link>
+        )}
 
         {/* Venue map — helps guest find the venue */}
         {ticket.venueAddress && !isClosed && (

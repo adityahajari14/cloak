@@ -1,11 +1,16 @@
 import AuthStatePage from "@/components/auth/AuthStatePage";
 import MasterDashboardPage from "@/components/admin/MasterDashboardPage";
 import { requirePlatformAdmin } from "@/lib/auth/guards";
-import { getAdminDashboardData } from "@/lib/admin-dashboard";
+import { getAdminDashboardData, type CountryFilter } from "@/lib/admin-dashboard";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = Promise<{ message?: string }>;
+type SearchParams = Promise<{ message?: string; country?: string }>;
+
+function normalizeCountryFilter(value: string | undefined): CountryFilter {
+  if (value === "United Kingdom" || value === "United Arab Emirates") return value;
+  return "all";
+}
 
 export default async function Page({ searchParams }: { searchParams: SearchParams }) {
   const guard = await requirePlatformAdmin("/masterdashboard");
@@ -20,7 +25,8 @@ export default async function Page({ searchParams }: { searchParams: SearchParam
   }
 
   const params = await searchParams;
-  const data = await getAdminDashboardData();
+  const countryFilter = normalizeCountryFilter(params.country);
+  const data = await getAdminDashboardData(countryFilter);
 
   return <MasterDashboardPage data={data} message={params.message} />;
 }

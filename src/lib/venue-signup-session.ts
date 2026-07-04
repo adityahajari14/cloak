@@ -29,6 +29,7 @@ export type VenueEntry = {
 export type VenueSignupDraft = {
   // Step 1 — plan selection
   billingPlan?: VenuePlanId;
+  billingCadence?: "monthly" | "annual";
 
   // Step 2 — contact + venue details
   contactName: string;

@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 import jwt from "jsonwebtoken";
 import { getPublicTicketByCode, getPublicTicketByToken } from "@/lib/tickets";
+import { getMemberByToken } from "@/lib/membership";
 
 function isConfigured() {
   return !!(
@@ -23,6 +24,53 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const code = searchParams.get("code");
   const token = searchParams.get("token");
+  const member = searchParams.get("member");
+
+  const issuerId = process.env.GOOGLE_WALLET_ISSUER_ID!;
+
+  // ── Cloak Club membership pass — permanent, venue-agnostic ──────────────────
+  if (member) {
+    const memberRecord = await getMemberByToken(member);
+    if (!memberRecord) {
+      return NextResponse.json({ error: "Membership not found." }, { status: 404 });
+    }
+
+    const classId = `${issuerId}.cloak_ticket`;
+    const objectId = `${issuerId}.member_${memberRecord.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+    const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "").replace(/\/$/, "");
+    const origin = siteUrl.startsWith("http") ? new URL(siteUrl).origin : "http://localhost:3000";
+
+    const memberObject = {
+      id: objectId,
+      classId,
+      state: "ACTIVE",
+      cardTitle: { defaultValue: { language: "en", value: "Cloak Club" } },
+      header: { defaultValue: { language: "en", value: memberRecord.fullName } },
+      subheader: { defaultValue: { language: "en", value: "Lifetime member" } },
+      textModulesData: [
+        { id: "member", header: "MEMBER", body: memberRecord.fullName },
+        { id: "email", header: "EMAIL", body: memberRecord.email },
+      ],
+      barcode: {
+        type: "QR_CODE",
+        value: member,
+        alternateText: "Cloak Club",
+      },
+      hexBackgroundColor: "#18181b",
+    };
+
+    const memberPayload = {
+      iss: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL!,
+      aud: "google",
+      origins: [origin],
+      typ: "savetowallet",
+      payload: { genericObjects: [memberObject] },
+    };
+
+    const memberKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY!.replace(/\\n/g, "\n");
+    const memberJwt = jwt.sign(memberPayload, memberKey, { algorithm: "RS256" });
+    return NextResponse.redirect(`https://pay.google.com/gp/v/save/${memberJwt}`, { status: 302 });
+  }
 
   const result = code
     ? await getPublicTicketByCode(code)
@@ -35,7 +83,6 @@ export async function GET(req: NextRequest) {
   }
 
   const t = result.ticket;
-  const issuerId = process.env.GOOGLE_WALLET_ISSUER_ID!;
   const classId = `${issuerId}.cloak_ticket`;
   const objectId = `${issuerId}.${t.ticketId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
 
@@ -53,7 +100,7 @@ export async function GET(req: NextRequest) {
       defaultValue: {
         language: "en",
         value:
-          t.status === "active"
+          t.status === "active" || t.status === "forgotten"
             ? `Stored — ${t.storageLocation ?? t.itemType ?? "Items"}`
             : t.status === "pending_activation"
               ? "Awaiting activation"

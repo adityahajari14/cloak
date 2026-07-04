@@ -12,7 +12,10 @@ export default async function TicketQrCard({
   wallet: WalletConfig;
   walletParam: string;
 }) {
-  const isUsable = ticket.status === "pending_activation" || ticket.status === "active";
+  const isUsable =
+    ticket.status === "pending_activation" ||
+    ticket.status === "active" ||
+    ticket.status === "forgotten";
   const isClosed =
     ticket.status === "collected" ||
     ticket.status === "expired" ||

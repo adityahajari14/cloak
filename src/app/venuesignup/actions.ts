@@ -46,6 +46,8 @@ async function findUserByEmail(email: string) {
 
 export async function selectVenuePlan(formData: FormData) {
   const plan = readField(formData, "plan");
+  const billingCadenceRaw = readField(formData, "billingCadence");
+  const billingCadence: "monthly" | "annual" = billingCadenceRaw === "annual" ? "annual" : "monthly";
 
   if (!isSupabaseAdminConfigured()) {
     fail("/venuesignup", "Plan selection is temporarily unavailable.");
@@ -57,8 +59,9 @@ export async function selectVenuePlan(formData: FormData) {
 
   const existing = await getDraftVenueSignup();
   const draft: VenueSignupDraft = existing
-    ? { ...existing, billingPlan: plan }
+    ? { ...existing, billingCadence, billingPlan: plan }
     : {
+        billingCadence,
         billingPlan: plan,
         contactName: "",
         companyName: "",
@@ -263,6 +266,7 @@ export async function finishVenueSignup(formData: FormData) {
       .insert({
         active: true,
         address,
+        billing_cadence: draft.billingCadence ?? "monthly",
         billing_plan: draft.billingPlan,
         billing_status: "trialing",
         capacity: entry.hangerCapacity + entry.bagCapacity,

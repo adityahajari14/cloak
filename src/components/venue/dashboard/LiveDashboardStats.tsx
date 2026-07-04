@@ -109,7 +109,14 @@ export default function LiveDashboardStats({
       const now = new Date().toISOString();
       const today = todayStart.toISOString();
 
-      const [pending, storedTickets, collected, all, forgotten, occupiedItems] = await Promise.all([
+      // Forgotten tickets still have items physically in storage, so they
+      // count toward occupancy/capacity same as active/partially_collected —
+      // "forgotten" is a real status now (event ended without collection),
+      // plus we keep the time-based fallback for tickets whose event hasn't
+      // been explicitly ended yet.
+      const occupyingStatuses = ["active", "partially_collected", "forgotten"] as const;
+
+      const [pending, all, occupiedItems, allVenueTickets] = await Promise.all([
         supabase
           .from("tickets")
           .select("id", { count: "exact", head: true })
@@ -119,56 +126,76 @@ export default function LiveDashboardStats({
           .from("tickets")
           .select("id", { count: "exact", head: true })
           .eq("venue_id", venueId!)
-          .in("status", ["active", "partially_collected"]),
-        supabase
-          .from("tickets")
-          .select("id", { count: "exact", head: true })
-          .eq("venue_id", venueId!)
-          .eq("status", "collected")
-          .gte("collected_at", today),
-        supabase
-          .from("tickets")
-          .select("id", { count: "exact", head: true })
-          .eq("venue_id", venueId!)
           .gte("created_at", today),
-        supabase
-          .from("tickets")
-          .select("id", { count: "exact", head: true })
-          .eq("venue_id", venueId!)
-          .eq("status", "pending_activation")
-          .lt("expires_at", now),
-        // Fetch active/partial ticket IDs to join against ticket_items
+        // Occupying ticket IDs to join against ticket_items for stored/capacity counts
         supabase
           .from("tickets")
           .select("id")
           .eq("venue_id", venueId!)
-          .in("status", ["active", "partially_collected"]),
+          .in("status", occupyingStatuses),
+        // All venue ticket IDs, to sum items collected today across any ticket
+        // (including partially_collected ones)
+        supabase
+          .from("tickets")
+          .select("id")
+          .eq("venue_id", venueId!),
       ]);
 
-      const activeIds = (occupiedItems.data ?? []).map((t) => t.id);
+      const forgottenCountPromise = supabase
+        .from("tickets")
+        .select("id", { count: "exact", head: true })
+        .eq("venue_id", venueId!)
+        .or(`status.eq.forgotten,and(status.eq.pending_activation,expires_at.lt.${now})`);
+
+      const occupyingIds = (occupiedItems.data ?? []).map((t) => t.id);
+      const allTicketIds = (allVenueTickets.data ?? []).map((t) => t.id);
+
       let hangerStored = 0;
       let bagStored = 0;
+      let storedItemCount = 0;
 
-      if (activeIds.length > 0) {
-        const { data: itemRows } = await supabase
-          .from("ticket_items")
-          .select("storage_location")
-          .in("ticket_id", activeIds)
-          .not("storage_location", "is", null)
-          .is("collected_at", null);
-        hangerStored = (itemRows ?? []).filter((i) => i.storage_location?.startsWith("H-")).length;
-        bagStored = (itemRows ?? []).filter((i) => i.storage_location?.startsWith("B-")).length;
-      }
+      const [itemRowsResult, forgottenResult, collectedTodayResult] = await Promise.all([
+        occupyingIds.length > 0
+          ? supabase
+              .from("ticket_items")
+              .select("storage_location, quantity")
+              .in("ticket_id", occupyingIds)
+              .not("storage_location", "is", null)
+              .is("collected_at", null)
+          : Promise.resolve({ data: [] as Array<{ storage_location: string | null; quantity: number }> }),
+        forgottenCountPromise,
+        allTicketIds.length > 0
+          ? supabase
+              .from("ticket_items")
+              .select("quantity")
+              .in("ticket_id", allTicketIds)
+              .gte("collected_at", today)
+          : Promise.resolve({ data: [] as Array<{ quantity: number }> }),
+      ]);
+
+      const itemRows = itemRowsResult.data ?? [];
+      hangerStored = itemRows
+        .filter((i) => i.storage_location?.startsWith("H-"))
+        .reduce((sum, i) => sum + (i.quantity || 1), 0);
+      bagStored = itemRows
+        .filter((i) => i.storage_location?.startsWith("B-"))
+        .reduce((sum, i) => sum + (i.quantity || 1), 0);
+      storedItemCount = itemRows.reduce((sum, i) => sum + (i.quantity || 1), 0);
+
+      const collectedItemCountToday = (collectedTodayResult.data ?? []).reduce(
+        (sum, i) => sum + (i.quantity || 1),
+        0,
+      );
 
       setCounts((prev) => ({
         ...prev,
         bagStored,
         hangerStored,
         pending: pending.count ?? prev.pending,
-        stored: storedTickets.count ?? prev.stored,
-        collected: collected.count ?? prev.collected,
+        stored: storedItemCount,
+        collected: collectedItemCountToday,
         today: all.count ?? prev.today,
-        forgotten: forgotten.count ?? prev.forgotten,
+        forgotten: forgottenResult.count ?? prev.forgotten,
       }));
     }
 

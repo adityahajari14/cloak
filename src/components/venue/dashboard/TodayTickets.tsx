@@ -27,6 +27,7 @@ function statusLabel(status: VenueTicketListItem["status"]) {
   if (status === "pending_activation") return "Pending";
   if (status === "active") return "Stored";
   if (status === "partially_collected") return "Partial";
+  if (status === "forgotten") return "Forgotten";
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
@@ -34,6 +35,7 @@ function statusTone(status: VenueTicketListItem["status"]): StatusTone {
   if (status === "active" || status === "partially_collected") return "green";
   if (status === "pending_activation") return "warning";
   if (status === "collected") return "blue";
+  if (status === "forgotten") return "danger";
   return "danger";
 }
 
@@ -240,9 +242,6 @@ function TicketRow({
   deletingId: string | null;
 }) {
   const isPending = ticket.status === "pending_activation";
-  const slots = ticket.storageLocation
-    ? ticket.storageLocation.split(",").map((s) => s.trim()).filter(Boolean)
-    : [];
 
   return (
     <div className="flex items-center gap-3 px-3 py-3 hover:bg-zinc-50 sm:px-4">
@@ -265,14 +264,18 @@ function TicketRow({
 
       {/* Right side — slot + optional delete */}
       <div className="flex shrink-0 flex-col items-end gap-1.5">
-        {slots.length > 0 ? (
+        {ticket.slots.length > 0 ? (
           <div className="flex flex-wrap justify-end gap-1">
-            {slots.map((slot) => (
+            {ticket.slots.map((slot, i) => (
               <span
-                className="rounded bg-foreground px-1.5 py-0.5 font-mono text-xs font-bold text-white"
-                key={slot}
+                className={`rounded px-1.5 py-0.5 font-mono text-xs font-bold ${
+                  slot.collected
+                    ? "bg-zinc-100 text-zinc-400 line-through"
+                    : "bg-foreground text-white"
+                }`}
+                key={`${slot.label}-${i}`}
               >
-                {slot}
+                {slot.label}
               </span>
             ))}
           </div>

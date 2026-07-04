@@ -1,19 +1,12 @@
 import { SecondaryLink } from "@/components/shared/ButtonLink";
 import PageShell from "@/components/shared/PageShell";
-import type { AdminDashboardData } from "@/lib/admin-dashboard";
+import { COUNTRY_FILTER_OPTIONS, type AdminDashboardData } from "@/lib/admin-dashboard";
 import VenueMapPanel from "./VenueMapPanel";
 import VenueTable from "./VenueTable";
+import CountryFilterSelect from "./CountryFilterSelect";
 
 // ─── SVG icons ────────────────────────────────────────────────────────────────
 
-function IconClock() {
-  return (
-    <svg fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" className="h-5 w-5">
-      <circle cx="12" cy="12" r="9" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M12 7v5l3 3" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 function IconBuilding() {
   return (
     <svg fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" className="h-5 w-5">
@@ -21,24 +14,10 @@ function IconBuilding() {
     </svg>
   );
 }
-function IconCheckCircle() {
+function IconChart() {
   return (
     <svg fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" className="h-5 w-5">
-      <path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function IconBox() {
-  return (
-    <svg fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" className="h-5 w-5">
-      <path d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function IconTicket() {
-  return (
-    <svg fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" className="h-5 w-5">
-      <path d="M16.5 6v.75a3 3 0 0 1 0 6v.75m0-7.5H7.5m9 7.5H7.5m0-7.5v-.75a3 3 0 0 0 0 6v.75M3 9.75h18v4.5H3z" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 3v18h18M7 15l4-5 3 3 5-6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -49,14 +28,27 @@ function IconExclamation() {
     </svg>
   );
 }
+function IconUserMinus() {
+  return (
+    <svg fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" className="h-5 w-5">
+      <path d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM18.75 9.75h-6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function IconPhone() {
+  return (
+    <svg fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" className="h-5 w-5">
+      <path d="M2.25 6.75c0 8.284 6.716 15 15 15h1.5a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.362-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 const STAT_ICONS: Record<string, React.ReactNode> = {
-  "Pending venues": <IconClock />,
-  "Active venues": <IconBuilding />,
-  "Approved venues": <IconCheckCircle />,
-  "Stored items": <IconBox />,
-  "Total tickets": <IconTicket />,
+  "Total venues": <IconBuilding />,
+  "MRR": <IconChart />,
   "Billing issues": <IconExclamation />,
+  "Cancellations": <IconUserMinus />,
+  "Demo call requests": <IconPhone />,
 };
 
 type Tone = "green" | "warning" | "danger" | "neutral" | "blue";
@@ -82,9 +74,7 @@ function StatCard({
 }) {
   const tone = normalizeTone(stat.tone);
   const style = cardStyle[tone];
-  const isPending = stat.label === "Pending venues" && Number(stat.value) > 0;
-  const isBilling = stat.label === "Billing issues" && Number(stat.value) > 0;
-  const hasAlert = isPending || isBilling;
+  const hasAlert = stat.label === "Billing issues" && Number(stat.value) > 0;
 
   return (
     <div
@@ -120,21 +110,13 @@ export default function MasterDashboardPage({
   data: AdminDashboardData;
   message?: string;
 }) {
-  const pending = data.stats.find((s) => s.label === "Pending venues");
-  const hasPending = Number(pending?.value ?? 0) > 0;
-
-  // Split stats: urgent first (pending + billing), then operational
-  const urgentLabels = ["Pending venues", "Billing issues"];
-  const urgentStats = data.stats.filter((s) => urgentLabels.includes(s.label));
-  const operationalStats = data.stats.filter((s) => !urgentLabels.includes(s.label));
-
   return (
     <PageShell
       activePath="/masterdashboard"
       eyebrow="Platform admin"
       title="Admin console"
-      description="Monitor venues, manage approvals, and track platform health."
-      actions={<SecondaryLink href="/analytics">View analytics</SecondaryLink>}
+      description="Monitor venues and track platform health."
+      actions={<SecondaryLink href="/masterdashboard/analytics">View analytics</SecondaryLink>}
     >
       {/* Toast notification */}
       {message ? (
@@ -144,41 +126,16 @@ export default function MasterDashboardPage({
         </div>
       ) : null}
 
-      {/* Attention banner when reviews are waiting */}
-      {hasPending && (
-        <div className="flex items-start gap-4 rounded-xl border border-line bg-panel px-5 py-4 shadow-sm">
-          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600">
-            <IconClock />
-          </span>
-          <div>
-            <p className="text-sm font-semibold text-foreground">
-              {pending!.value} venue{Number(pending!.value) !== 1 ? "s" : ""} awaiting review
-            </p>
-            <p className="mt-0.5 text-xs text-muted">
-              Scroll to the venue table and filter by "Pending review" to action them.
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* ── Stat grid ── */}
       <div>
-        <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted">
-          Requires attention
-        </p>
-        <div className="grid grid-cols-2 gap-3">
-          {urgentStats.map((stat) => (
-            <StatCard key={stat.label} stat={stat} />
-          ))}
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted">
+            Platform overview
+          </p>
+          <CountryFilterSelect value={data.countryFilter} />
         </div>
-      </div>
-
-      <div>
-        <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted">
-          Platform overview
-        </p>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {operationalStats.map((stat) => (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          {data.stats.map((stat) => (
             <StatCard key={stat.label} stat={stat} />
           ))}
         </div>

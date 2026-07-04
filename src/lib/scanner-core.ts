@@ -162,11 +162,84 @@ export async function loadTicketById(supabase: SupabaseAdmin, ticketId: string) 
   return data;
 }
 
+/**
+ * Resolve a scanned Cloak Club membership token to a usable ticket at the given
+ * venue. Members carry a permanent, venue-agnostic pass — each scan should land
+ * on a live ticket for them at this venue: reuse an open one if present,
+ * otherwise mint a fresh pending ticket. Returns null if the value isn't a
+ * membership token.
+ */
+export async function resolveMembershipTicket(
+  supabase: SupabaseAdmin,
+  value: string,
+  venueId: string,
+): Promise<TicketRow | null> {
+  const { data: member } = await supabase
+    .from("guest_contacts")
+    .select("id, full_name, email, phone")
+    .eq("membership_token_hash", hashTicketToken(value.trim()))
+    .maybeSingle();
+
+  if (!member) return null;
+
+  // Reuse an open ticket for this member at this venue if one exists —
+  // including a forgotten one, since its items are still physically stored.
+  const { data: openTicket } = await supabase
+    .from("tickets")
+    .select("*")
+    .eq("venue_id", venueId)
+    .eq("guest_contact_id", member.id)
+    .in("status", ["pending_activation", "active", "partially_collected", "forgotten"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (openTicket) return openTicket;
+
+  // Otherwise mint a fresh pending ticket for this visit.
+  const { createPublicCode, createTicketToken } = await import("@/lib/tickets");
+  const ticketToken = createTicketToken();
+  const { data: venue } = await supabase
+    .from("venues")
+    .select("ticket_expiry_hours")
+    .eq("id", venueId)
+    .maybeSingle();
+
+  const expiryHours = venue?.ticket_expiry_hours ?? null;
+  const expiresAt = expiryHours !== null
+    ? new Date(Date.now() + expiryHours * 60 * 60 * 1000).toISOString()
+    : new Date("9999-12-31T23:59:59Z").toISOString();
+
+  const { data: created } = await supabase
+    .from("tickets")
+    .insert({
+      venue_id: venueId,
+      guest_contact_id: member.id,
+      guest_email: member.email,
+      guest_name: member.full_name,
+      guest_phone: member.phone,
+      public_code: createPublicCode(),
+      qr_token_hash: ticketToken.hash,
+      expires_at: expiresAt,
+    })
+    .select("*")
+    .single();
+
+  return created ?? null;
+}
+
 export async function lookupTicketByInput(
   supabase: SupabaseAdmin,
   value: string,
   venueId?: string,
 ) {
+  // A Cloak Club membership token resolves to a live ticket for the member at
+  // this venue (venue is required to know where to activate).
+  if (venueId) {
+    const memberTicket = await resolveMembershipTicket(supabase, value, venueId);
+    if (memberTicket) return memberTicket;
+  }
+
   const lookup = normalizeLookup(value);
   if (!lookup) return null;
 
@@ -240,8 +313,10 @@ export async function writeAcceptedScan({
 
 // ─── Slot assignment ──────────────────────────────────────────────────────────
 
-// A slot stays occupied while the ticket is active OR partially collected.
-const OCCUPYING_STATUSES: TicketRow["status"][] = ["active", "partially_collected"];
+// A slot stays occupied while the ticket is active, partially collected, or
+// forgotten — a forgotten ticket's items are still physically in the
+// cloakroom until someone actually checks them out.
+const OCCUPYING_STATUSES: TicketRow["status"][] = ["active", "partially_collected", "forgotten"];
 
 // Format a raw internal slot (e.g. "h5", "b2") to the display label "H-5" / "B-2".
 export function formatSlot(raw: string): string {

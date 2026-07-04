@@ -3,11 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import {
   changeMyPassword,
+  confirmVenueCancellation,
   createVenueStaffAccount,
+  previewVenueCancellation,
   removeStaffMember,
+  resumeVenueSubscription,
   updateMyProfile,
   updateVenueDetails,
   updateVenueExpiry,
+  type CancellationPreview,
 } from "@/app/venuesettings/actions";
 import PageShell from "@/components/shared/PageShell";
 import Panel from "@/components/shared/Panel";
@@ -90,6 +94,178 @@ function CopyButton({ text }: { text: string }) {
     >
       {copied ? "Copied!" : "Copy"}
     </button>
+  );
+}
+
+function formatCancelDate(iso: string): string {
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric" }).format(new Date(iso));
+}
+
+function CancellationSection({ venue }: { venue: VenueInfo | null }) {
+  const [preview, setPreview] = useState<CancellationPreview | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [payRemainder, setPayRemainder] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [resuming, setResuming] = useState(false);
+  const [error, setError] = useState("");
+  const [step, setStep] = useState<"idle" | "review" | "confirmed">("idle");
+
+  const isPending = !!venue?.cancellationRequestedAt && !!venue?.subscriptionEndsAt;
+
+  async function startReview() {
+    if (!venue) return;
+    setError("");
+    setLoadingPreview(true);
+    try {
+      const result = await previewVenueCancellation(venue.id);
+      if ("error" in result) {
+        setError(result.error);
+      } else {
+        setPreview(result);
+        setStep("review");
+      }
+    } finally {
+      setLoadingPreview(false);
+    }
+  }
+
+  async function handleConfirm() {
+    if (!venue) return;
+    setError("");
+    setConfirming(true);
+    try {
+      const result = await confirmVenueCancellation(venue.id, payRemainder);
+      if (result.ok) {
+        setStep("confirmed");
+      } else {
+        setError(result.error ?? "Could not process cancellation.");
+      }
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  async function handleResume() {
+    if (!venue) return;
+    setError("");
+    setResuming(true);
+    try {
+      const result = await resumeVenueSubscription(venue.id);
+      if (result.ok) {
+        window.location.reload();
+      } else {
+        setError(result.error ?? "Could not resume subscription.");
+      }
+    } finally {
+      setResuming(false);
+    }
+  }
+
+  if (step === "confirmed") {
+    return (
+      <Panel title="Cancel subscription">
+        <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Cancellation scheduled. Your subscription will end on{" "}
+          {preview ? formatCancelDate(preview.effectiveEndDate) : "the confirmed date"}.
+        </div>
+      </Panel>
+    );
+  }
+
+  if (isPending && venue) {
+    return (
+      <Panel title="Subscription" description="A cancellation is scheduled for this venue.">
+        <div className="grid gap-3">
+          <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Your subscription is scheduled to end on {formatCancelDate(venue.subscriptionEndsAt!)}.
+            {venue.cancellationPayRemainder ? " You chose to pay the remaining balance now." : ""}
+          </div>
+          {error ? <p className="text-xs font-medium text-red-600">{error}</p> : null}
+          <div>
+            <button
+              className="rounded-xl border border-line bg-white px-4 py-2.5 text-sm font-medium text-foreground transition hover:bg-zinc-50 disabled:opacity-50"
+              disabled={resuming}
+              onClick={handleResume}
+              type="button"
+            >
+              {resuming ? "Resuming…" : "Keep my subscription"}
+            </button>
+          </div>
+        </div>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel title="Cancel subscription" description="This will schedule your venue's subscription to end.">
+      {step === "idle" ? (
+        <div className="grid gap-3">
+          <p className="text-sm text-muted">
+            Every plan commits to a 1-year minimum term from your signup date. We'll show you exactly
+            when your subscription would end before anything is confirmed.
+          </p>
+          {error ? <p className="text-xs font-medium text-red-600">{error}</p> : null}
+          <div>
+            <button
+              className="rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+              disabled={loadingPreview || !venue}
+              onClick={startReview}
+              type="button"
+            >
+              {loadingPreview ? "Checking…" : "Cancel subscription"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        preview && (
+          <div className="grid gap-4">
+            <div className="rounded-lg border border-line bg-zinc-50 px-4 py-3 text-sm text-foreground">
+              {preview.message}
+            </div>
+
+            {preview.canPayRemainder && (
+              <label className="flex items-start gap-3 rounded-lg border border-line px-4 py-3">
+                <input
+                  checked={payRemainder}
+                  className="mt-0.5 h-4 w-4 accent-foreground"
+                  onChange={(e) => setPayRemainder(e.target.checked)}
+                  type="checkbox"
+                />
+                <span className="text-sm text-foreground">
+                  Pay the remaining balance now instead
+                  {preview.remainderAmount !== null && (
+                    <> — <strong>£{preview.remainderAmount}</strong> ({preview.remainingMonthlyCharges} remaining month
+                    {preview.remainingMonthlyCharges === 1 ? "" : "s"})</>
+                  )}{" "}
+                  and end my subscription immediately.
+                </span>
+              </label>
+            )}
+
+            {error ? <p className="text-xs font-medium text-red-600">{error}</p> : null}
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
+                disabled={confirming}
+                onClick={handleConfirm}
+                type="button"
+              >
+                {confirming ? "Confirming…" : "Confirm cancellation"}
+              </button>
+              <button
+                className="rounded-xl border border-line bg-white px-4 py-2.5 text-sm font-medium text-foreground transition hover:bg-zinc-50"
+                disabled={confirming}
+                onClick={() => setStep("idle")}
+                type="button"
+              >
+                Go back
+              </button>
+            </div>
+          </div>
+        )
+      )}
+    </Panel>
   );
 }
 
@@ -293,6 +469,8 @@ export default function VenueSettingsPage({
           )}
 
           <ExpiryToggleSection venue={venue} />
+
+          <CancellationSection venue={venue} />
         </>
       )}
 

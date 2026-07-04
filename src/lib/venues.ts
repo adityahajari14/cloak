@@ -49,6 +49,14 @@ export const venuePlans = [
 
 export type VenuePlanId = (typeof venuePlans)[number]["id"];
 
+// Monthly prices in GBP, used for both the signup pricing toggle and the
+// cancellation "pay remaining balance" calculation. per_event has no monthly
+// price — it's billed per event, not a subscription.
+export const MONTHLY_PLAN_PRICES: Partial<Record<VenuePlanId, number>> = {
+  starter: 49,
+  professional: 149,
+};
+
 export function slugifyVenueName(name: string) {
   const base = name
     .toLowerCase()

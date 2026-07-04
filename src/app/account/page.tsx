@@ -10,6 +10,9 @@ function statusLabel(status: string) {
     case "pending_activation": return "Awaiting activation";
     case "active": return "Stored";
     case "partially_collected": return "Partially collected";
+    // Guests see "forgotten" the same as an active ticket — the items are
+    // still stored, "forgotten" is a staff-only operational flag.
+    case "forgotten": return "Stored";
     case "collected": return "Collected";
     case "cancelled": return "Cancelled";
     case "expired": return "Expired";
@@ -21,6 +24,7 @@ function statusColor(status: string) {
   switch (status) {
     case "active": return "bg-emerald-50 text-emerald-700 border-emerald-200";
     case "partially_collected": return "bg-emerald-50 text-emerald-700 border-emerald-200";
+    case "forgotten": return "bg-emerald-50 text-emerald-700 border-emerald-200";
     case "pending_activation": return "bg-amber-50 text-amber-700 border-amber-200";
     case "collected": return "bg-zinc-100 text-zinc-600 border-zinc-200";
     default: return "bg-red-50 text-red-600 border-red-200";
@@ -42,7 +46,7 @@ export default async function AccountPage() {
   const data = await getAccountData();
   if (!data) redirect("/?signin=1");
 
-  const openStatuses = ["active", "partially_collected", "pending_activation"];
+  const openStatuses = ["active", "partially_collected", "pending_activation", "forgotten"];
   const active = data.tickets.filter((t) => openStatuses.includes(t.status));
   const past = data.tickets.filter((t) => !openStatuses.includes(t.status));
 
@@ -137,7 +141,7 @@ export default async function AccountPage() {
 }
 
 export function TicketCard({ ticket }: { ticket: CustomerTicket }) {
-  const isActive = ticket.status === "active";
+  const isActive = ticket.status === "active" || ticket.status === "forgotten";
   const isPending = ticket.status === "pending_activation";
 
   return (

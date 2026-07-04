@@ -2,6 +2,7 @@ import AuthStatePage from "@/components/auth/AuthStatePage";
 import VenueTicketDetailPage from "@/components/venue/ticket-detail/VenueTicketDetailPage";
 import { requireVenueAccess } from "@/lib/auth/guards";
 import { getVenueTicketDetail } from "@/lib/venue-dashboard";
+import { getTicketContactLog } from "@/app/venueticketdetail/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -26,10 +27,12 @@ export default async function Page({ searchParams }: { searchParams: SearchParam
   }
 
   const params = await searchParams;
+  const ticketId = getParam(params.id);
   const ticket = await getVenueTicketDetail({
     context: guard,
-    ticketId: getParam(params.id),
+    ticketId,
   });
+  const contactLog = ticket ? await getTicketContactLog(ticket.id) : [];
 
-  return <VenueTicketDetailPage ticket={ticket} />;
+  return <VenueTicketDetailPage contactLog={contactLog} ticket={ticket} />;
 }

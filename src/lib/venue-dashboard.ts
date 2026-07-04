@@ -6,6 +6,11 @@ type TicketStatus = Database["public"]["Enums"]["ticket_status"];
 type StatusTone = "blue" | "green" | "warning" | "danger" | "neutral";
 type SupabaseAdmin = ReturnType<typeof createAdminClient>;
 
+export type VenueTicketSlot = {
+  label: string;
+  collected: boolean;
+};
+
 export type VenueTicketListItem = {
   activatedAt: string | null;
   collectedAt: string | null;
@@ -18,6 +23,7 @@ export type VenueTicketListItem = {
   itemSummary: string;
   lastActivityAt: string;
   publicCode: string;
+  slots: VenueTicketSlot[];
   status: TicketStatus;
   storageLocation: string | null;
   venueName: string;
@@ -34,17 +40,22 @@ export type VenueStaffMember = {
 export type VenueInfo = {
   address: string | null;
   bagCapacity: number;
+  billingCadence: "monthly" | "annual";
   billingPlan: string | null;
+  cancellationPayRemainder: boolean;
+  cancellationRequestedAt: string | null;
   capacity: number;
   city: string | null;
   contactEmail: string;
   contactPhone: string | null;
+  createdAt: string;
   extraDevices: number;
   hangerCapacity: number;
   id: string;
   name: string;
   postalCode: string | null;
   slug: string;
+  subscriptionEndsAt: string | null;
   ticketExpiryHours: number | null;
 };
 
@@ -203,9 +214,29 @@ function buildItemSummary(
   return parts.join(", ");
 }
 
-// Note: "forgotten" is intentionally absent here. No ticket row ever holds this
-// status — "forgotten" means a pending_activation ticket whose expires_at has passed.
-// It needs a compound filter, applied separately below.
+// Per-item slot rows carry accurate collected state. Older tickets predating
+// per-item storage only have the legacy comma-joined storage_location string
+// on the ticket itself — treat those as all still occupied.
+function buildSlotList(
+  itemSlots: VenueTicketSlot[] | undefined,
+  legacyStorageLocation: string | null,
+): VenueTicketSlot[] {
+  if (itemSlots && itemSlots.length > 0) return itemSlots;
+  if (!legacyStorageLocation) return [];
+  return legacyStorageLocation
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((label) => ({ label, collected: false }));
+}
+
+// Note: "forgotten" covers two cases, handled separately below because they
+// need different query shapes:
+//  1. status === "forgotten" — set explicitly when a manager ends an event
+//     and tickets on it were never collected (see endEvent).
+//  2. A pending_activation ticket whose expires_at has already passed but
+//     whose event (if any) hasn't been ended yet — nobody has flagged it
+//     forgotten explicitly, but it functionally is (the guest never showed).
 const FILTER_TO_STATUS: Partial<Record<TicketFilter, TicketStatus[]>> = {
   active: ["active", "partially_collected"],
   collected: ["collected"],
@@ -296,7 +327,9 @@ function isManagerContext(context: AuthorizedContext) {
 async function getVenueMeta(supabase: SupabaseAdmin, venueIds: string[] | null) {
   let query = supabase
     .from("venues")
-    .select("id, name, capacity, hanger_capacity, bag_capacity, extra_devices, address, city, postal_code, contact_email, contact_phone, billing_plan, slug, ticket_expiry_hours")
+    .select(
+      "id, name, capacity, hanger_capacity, bag_capacity, extra_devices, address, city, postal_code, contact_email, contact_phone, billing_plan, billing_cadence, cancellation_requested_at, cancellation_pay_remainder, subscription_ends_at, created_at, slug, ticket_expiry_hours",
+    )
     .order("name");
 
   if (venueIds) query = query.in("id", venueIds);
@@ -311,17 +344,22 @@ async function getVenueMeta(supabase: SupabaseAdmin, venueIds: string[] | null) 
   const venueInfoList: VenueInfo[] = venues.map((v) => ({
     address: v.address,
     bagCapacity: v.bag_capacity ?? 0,
+    billingCadence: v.billing_cadence,
     billingPlan: v.billing_plan,
+    cancellationPayRemainder: v.cancellation_pay_remainder,
+    cancellationRequestedAt: v.cancellation_requested_at,
     capacity: v.capacity,
     city: v.city,
     contactEmail: v.contact_email,
     contactPhone: v.contact_phone,
+    createdAt: v.created_at,
     extraDevices: v.extra_devices ?? 0,
     hangerCapacity: v.hanger_capacity ?? 0,
     id: v.id,
     name: v.name,
     postalCode: v.postal_code,
     slug: v.slug,
+    subscriptionEndsAt: v.subscription_ends_at,
     ticketExpiryHours: v.ticket_expiry_hours ?? null,
   }));
 
@@ -502,10 +540,9 @@ export async function getVenueDashboardData({
   }
 
   if (activeFilter === "forgotten") {
-    // "Forgotten" = a pending ticket never activated before its expiry passed.
-    ticketQuery = ticketQuery
-      .eq("status", "pending_activation")
-      .lt("expires_at", new Date().toISOString());
+    ticketQuery = ticketQuery.or(
+      `status.eq.forgotten,and(status.eq.pending_activation,expires_at.lt.${new Date().toISOString()})`,
+    );
   } else {
     const selectedStatuses = FILTER_TO_STATUS[activeFilter];
     if (selectedStatuses) ticketQuery = ticketQuery.in("status", selectedStatuses);
@@ -518,21 +555,61 @@ export async function getVenueDashboardData({
     );
   }
 
-  const [todayCount, pendingCount, storedCount, collectedCount, forgottenCount, ticketRows] =
+  // Stored/Collected must reflect items, not tickets — a single ticket can hold
+  // several items across several slots, and a partially_collected ticket has
+  // some items returned and others still stored at the same time.
+  const storedItemsQuery = (async () => {
+    // Forgotten tickets still occupy their slots physically — the guest just
+    // never came back — so they count toward capacity same as active ones.
+    let openTickets = supabase
+      .from("tickets")
+      .select("id")
+      .in("status", ["active", "partially_collected", "forgotten"]);
+    if (venueIds) openTickets = openTickets.in("venue_id", venueIds);
+    const { data: rows } = await openTickets;
+    const ticketIds = (rows ?? []).map((r) => r.id);
+    if (ticketIds.length === 0) return 0;
+
+    const { data: items } = await supabase
+      .from("ticket_items")
+      .select("quantity")
+      .in("ticket_id", ticketIds)
+      .is("collected_at", null);
+    return (items ?? []).reduce((sum, i) => sum + (i.quantity || 1), 0);
+  })();
+
+  const collectedItemsTodayQuery = (async () => {
+    let venueTickets = supabase.from("tickets").select("id");
+    if (venueIds) venueTickets = venueTickets.in("venue_id", venueIds);
+    const { data: rows } = await venueTickets;
+    const ticketIds = (rows ?? []).map((r) => r.id);
+    if (ticketIds.length === 0) return 0;
+
+    const { data: items } = await supabase
+      .from("ticket_items")
+      .select("quantity")
+      .in("ticket_id", ticketIds)
+      .gte("collected_at", todayStart);
+    return (items ?? []).reduce((sum, i) => sum + (i.quantity || 1), 0);
+  })();
+
+  const [todayCount, pendingCount, forgottenCount, ticketRows, storedItemCount, collectedItemCountToday] =
     await Promise.all([
       scopedCount().gte("created_at", todayStart),
       scopedCount().eq("status", "pending_activation"),
-      scopedCount().in("status", ["active", "partially_collected"]),
-      scopedCount().eq("status", "collected").gte("collected_at", todayStart),
-      scopedCount().eq("status", "pending_activation").lt("expires_at", new Date().toISOString()),
+      scopedCount().or(
+        `status.eq.forgotten,and(status.eq.pending_activation,expires_at.lt.${new Date().toISOString()})`,
+      ),
       ticketQuery,
+      storedItemsQuery,
+      collectedItemsTodayQuery,
     ]);
 
-  const usedCapacity = storedCount.count ?? 0;
+  const usedCapacity = storedItemCount;
   const utilization = venueMeta.capacity > 0 ? Math.round((usedCapacity / venueMeta.capacity) * 100) : 0;
 
   const listedTicketIds = (ticketRows.data ?? []).map((t) => t.id);
-  const [venueNames, itemsByTicket] = await Promise.all([
+  const [venueNames, itemsByTicket, slotsByTicket] = await Promise.all([
     getVenueNameMap(
       supabase,
       [...new Set(ticketRows.data?.map((t) => t.venue_id) ?? [])],
@@ -549,6 +626,24 @@ export async function getVenueDashboardData({
       for (const row of data ?? []) {
         const arr = map.get(row.ticket_id) ?? [];
         arr.push({ label: row.label, quantity: row.quantity });
+        map.set(row.ticket_id, arr);
+      }
+      return map;
+    })(),
+    // Per-slot collected state, so a returned H-1/B-1 can be greyed out
+    // instead of showing as still occupied on the dashboard list.
+    (async () => {
+      const map = new Map<string, VenueTicketSlot[]>();
+      if (listedTicketIds.length === 0) return map;
+      const { data } = await supabase
+        .from("ticket_items")
+        .select("ticket_id, storage_location, collected_at")
+        .in("ticket_id", listedTicketIds)
+        .not("storage_location", "is", null);
+      for (const row of data ?? []) {
+        if (!row.storage_location) continue;
+        const arr = map.get(row.ticket_id) ?? [];
+        arr.push({ label: row.storage_location, collected: row.collected_at !== null });
         map.set(row.ticket_id, arr);
       }
       return map;
@@ -574,8 +669,8 @@ export async function getVenueDashboardData({
     stats: [
       { helper: "Tickets created today", label: "Today", value: formatCount(todayCount.count), tone: "neutral" },
       { helper: "Waiting at counter", label: "Pending", value: formatCount(pendingCount.count), tone: "warning" },
-      { helper: "Currently stored", label: "Stored", value: formatCount(storedCount.count), tone: "green" },
-      { helper: "Returned today", label: "Collected", value: formatCount(collectedCount.count), tone: "blue" },
+      { helper: "Items currently stored", label: "Stored", value: formatCount(storedItemCount), tone: "green" },
+      { helper: "Items returned today", label: "Collected", value: formatCount(collectedItemCountToday), tone: "blue" },
       { helper: "Expired before activation", label: "Forgotten", value: formatCount(forgottenCount.count), tone: "danger" },
       {
         helper: "Active storage use",
@@ -598,6 +693,7 @@ export async function getVenueDashboardData({
           itemSummary: buildItemSummary(itemsByTicket.get(t.id) ?? [], t.item_type, t.item_count),
           lastActivityAt: t.collected_at ?? t.activated_at ?? t.created_at,
           publicCode: t.public_code,
+          slots: buildSlotList(slotsByTicket.get(t.id), t.storage_location),
           status: t.status,
           storageLocation: t.storage_location,
           venueName: venueNames.get(t.venue_id) ?? venueMeta.label,
@@ -687,6 +783,12 @@ export async function getVenueTicketDetail({
         result: s.result,
         scanType: s.scan_type,
       })) ?? [],
+    slots: buildSlotList(
+      (items.data ?? [])
+        .filter((i) => i.storage_location)
+        .map((i) => ({ label: i.storage_location as string, collected: i.collected_at !== null })),
+      ticket.storage_location,
+    ),
     status: ticket.status,
     storageLocation: ticket.storage_location,
     venueName: venueNames.get(ticket.venue_id) ?? "Selected venue",
@@ -717,7 +819,7 @@ export async function getVenueAnalyticsData(context: AuthorizedContext): Promise
   const guests = tickets.length;
   const collected = tickets.filter((t) => t.status === "collected").length;
   const active = tickets.filter(
-    (t) => t.status === "active" || t.status === "partially_collected",
+    (t) => t.status === "active" || t.status === "partially_collected" || t.status === "forgotten",
   ).length;
   const storageDurations = tickets
     .filter((t) => t.activated_at && t.collected_at)

@@ -100,7 +100,7 @@ export default function BookADemoPage({
                     type="tel"
                   />
                 </label>
-                <label className="grid gap-1.5 text-sm font-medium text-foreground sm:col-span-2">
+                <label className="grid gap-1.5 text-sm font-medium text-foreground">
                   Typical capacity
                   <input
                     className={input}
@@ -108,6 +108,13 @@ export default function BookADemoPage({
                     placeholder="e.g. 200 items per night"
                     type="text"
                   />
+                </label>
+                <label className="grid gap-1.5 text-sm font-medium text-foreground">
+                  Country
+                  <select className={input} defaultValue="United Kingdom" name="country">
+                    <option value="United Kingdom">United Kingdom</option>
+                    <option value="United Arab Emirates">United Arab Emirates</option>
+                  </select>
                 </label>
               </div>
 
