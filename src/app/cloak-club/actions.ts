@@ -1,6 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
+import { createClient } from "@/lib/supabase/server";
 import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase/admin";
 import { isValidEmail, isValidPhone } from "@/lib/validation";
 import { createMembershipToken, isValidGender } from "@/lib/membership";
@@ -125,5 +127,59 @@ export async function joinCloakClub(formData: FormData) {
     }),
   }).catch(() => {});
 
+  redirect(`/cloak-club/welcome?member=${encodeURIComponent(rawToken)}`);
+}
+
+/**
+ * Re-issue a Cloak Club member's wallet pass from their My Account page.
+ * We only ever store the token's hash, so the original raw token can't be
+ * recovered — this mints a fresh one (rotating the pass, same as re-running
+ * signup) and sends it to the member's own email.
+ */
+export async function resendCloakClubPass(): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseAdminConfigured()) {
+    return { ok: false, error: "This is temporarily unavailable." };
+  }
+
+  const authClient = await createClient();
+  const {
+    data: { user },
+  } = await authClient.auth.getUser();
+  if (!user?.email) return { ok: false, error: "Not signed in." };
+
+  const email = user.email.toLowerCase();
+  const supabase = createAdminClient();
+
+  const { data: member } = await supabase
+    .from("guest_contacts")
+    .select("id, full_name, membership_token_hash")
+    .eq("email_normalized", email)
+    .maybeSingle();
+
+  if (!member?.membership_token_hash) {
+    return { ok: false, error: "No Cloak Club membership found for this account." };
+  }
+
+  const { token: rawToken, hash: tokenHash } = createMembershipToken();
+  const { error } = await supabase
+    .from("guest_contacts")
+    .update({ membership_token_hash: tokenHash })
+    .eq("id", member.id);
+
+  if (error) return { ok: false, error: "Could not refresh your pass. Please try again." };
+
+  const site = getSiteUrl();
+  const welcomeUrl = `${site}/cloak-club/welcome?member=${encodeURIComponent(rawToken)}`;
+
+  await sendEmail({
+    to: email,
+    subject: "Your Cloak Club pass",
+    react: CloakClubWelcomeEmail({
+      guestName: member.full_name,
+      passUrl: welcomeUrl,
+    }),
+  }).catch(() => {});
+
+  revalidatePath("/account");
   redirect(`/cloak-club/welcome?member=${encodeURIComponent(rawToken)}`);
 }

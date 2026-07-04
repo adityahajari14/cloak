@@ -36,7 +36,13 @@ export default async function Page({ searchParams }: { searchParams: SearchParam
   const selectedVenueId =
     params.venueId && venues.some((v) => v.id === params.venueId)
       ? params.venueId
-      : undefined;
+      // A single-venue account has no picker step and no venueId query param,
+      // but the venue is still unambiguous — default to it. Without this,
+      // venueId stays undefined and membership-pass scans (which require a
+      // venueId to resolve) always fail with "Ticket was not found."
+      : venues.length === 1
+        ? venues[0].id
+        : undefined;
 
   const venueRole = guard.venueRoles.some((r) => r.role === "manager") ? "manager" : "staff";
 

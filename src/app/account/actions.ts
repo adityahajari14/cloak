@@ -24,6 +24,7 @@ export type AccountData = {
   phone: string | null;
   provider: string | null;
   tickets: CustomerTicket[];
+  cloakClubMemberSince: string | null;
 };
 
 export type AccountGuardResult = "ok" | "unauthenticated" | "admin" | "venue";
@@ -51,7 +52,7 @@ export async function getAccountData(): Promise<AccountData | null> {
 
   const admin = createAdminClient();
 
-  const [profileResult, ticketsResult] = await Promise.all([
+  const [profileResult, ticketsResult, membershipResult] = await Promise.all([
     admin.from("profiles").select("full_name, phone").eq("id", user.id).maybeSingle(),
     admin
       .from("tickets")
@@ -59,6 +60,11 @@ export async function getAccountData(): Promise<AccountData | null> {
       .eq("guest_email", user.email ?? "")
       .order("created_at", { ascending: false })
       .limit(50),
+    admin
+      .from("guest_contacts")
+      .select("membership_token_hash, member_since")
+      .eq("email_normalized", (user.email ?? "").toLowerCase())
+      .maybeSingle(),
   ]);
 
   // Fetch venue names for all tickets
@@ -87,6 +93,9 @@ export async function getAccountData(): Promise<AccountData | null> {
     phone: profileResult.data?.phone ?? null,
     provider: user.app_metadata?.provider ?? null,
     tickets,
+    cloakClubMemberSince: membershipResult.data?.membership_token_hash
+      ? (membershipResult.data.member_since ?? null)
+      : null,
   };
 }
 

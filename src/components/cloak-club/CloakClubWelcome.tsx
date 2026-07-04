@@ -1,13 +1,16 @@
+import Image from "next/image";
 import Link from "next/link";
 import type { WalletConfig } from "@/lib/wallet";
 
 export default function CloakClubWelcome({
   guestName,
   memberToken,
+  qrDataUrl,
   wallet,
 }: {
   guestName: string;
   memberToken: string;
+  qrDataUrl: string;
   wallet: WalletConfig;
 }) {
   const walletParam = `member=${encodeURIComponent(memberToken)}`;
@@ -30,6 +33,16 @@ export default function CloakClubWelcome({
               any Cloak venue and refreshes after every visit.
             </p>
           </div>
+        </div>
+
+        {/* QR — lets the member use their pass straight from the website too */}
+        <div className="overflow-hidden rounded-2xl border border-line bg-panel">
+          <div className="flex justify-center bg-white p-6">
+            <Image alt="Cloak Club membership QR code" height={220} priority src={qrDataUrl} unoptimized width={220} />
+          </div>
+          <p className="border-t border-line px-4 py-3 text-center text-xs text-muted">
+            Show this QR code at the counter at any Cloak venue.
+          </p>
         </div>
 
         {/* Wallet buttons */}

@@ -1,7 +1,6 @@
 ﻿"use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 type Mode = "signin" | "signup";
@@ -74,7 +73,6 @@ export default function AuthModal({
   const [error, setError] = useState<string | null>(null);
   const [oauthLoading, setOauthLoading] = useState<"google" | "apple" | null>(null);
   const [isPending, startTransition] = useTransition();
-  const router = useRouter();
   const emailRef = useRef<HTMLInputElement>(null);
 
   // Sync mode when defaultMode prop changes (e.g. opened as signup)
@@ -175,8 +173,15 @@ export default function AuthModal({
       const finalDestination = (destination === "/" && explicitNext && explicitNext.startsWith("/"))
         ? explicitNext
         : destination;
-      router.push(finalDestination);
-      router.refresh();
+
+      // A hard navigation, not router.push — the destination (e.g. /venuedashboard)
+      // is server-rendered and checks the session via cookies. The Supabase
+      // browser client writes the session cookie asynchronously after
+      // signInWithPassword resolves, so an immediate router.push can reach the
+      // server before that cookie write lands, making the guard see no user
+      // and bounce back to the sign-in page. A full page load always carries
+      // whatever cookie is in the browser's jar at request time, closing the gap.
+      window.location.href = finalDestination;
     });
   }
 

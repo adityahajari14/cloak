@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getAccountData, checkAccountAccess, type CustomerTicket } from "./actions";
 import AccountEditForm from "./AccountEditForm";
 import AccountSignOutButton from "./AccountSignOutButton";
+import CloakClubCard from "./CloakClubCard";
 import PastTicketsToggle from "./PastTicketsToggle";
 
 function statusLabel(status: string) {
@@ -91,6 +92,9 @@ export default async function AccountPage() {
               </div>
             </div>
           </div>
+
+          {/* Cloak Club membership */}
+          <CloakClubCard memberSince={data.cloakClubMemberSince} />
 
           {/* Active tickets */}
           {active.length > 0 && (
