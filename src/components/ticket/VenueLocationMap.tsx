@@ -19,12 +19,26 @@ async function geocodeAddress(address: string): Promise<[number, number] | null>
   return null;
 }
 
+/**
+ * Coordinates are captured when the venue signs up and stored on the row, so
+ * they are the authoritative location. Use them.
+ *
+ * This map used to geocode the address string on every render instead, which
+ * put guests in the wrong place: the string is free text with no postcode, so
+ * "Sea Rock, North Finchley" resolved 500+ km away and "London Eye, London"
+ * pinned the actual London Eye. Geocoding is now only a fallback for a venue
+ * that somehow has no stored coordinates.
+ */
 export default function VenueLocationMap({
   address,
   venueName,
+  latitude,
+  longitude,
 }: {
   address: string;
   venueName: string;
+  latitude: number | null;
+  longitude: number | null;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<import("maplibre-gl").Map | null>(null);
@@ -34,7 +48,15 @@ export default function VenueLocationMap({
   useEffect(() => {
     let destroyed = false;
 
-    geocodeAddress(address).then((coords) => {
+    // MapLibre takes [lng, lat] — the reverse of how they're usually written.
+    const stored: [number, number] | null =
+      typeof latitude === "number" && typeof longitude === "number"
+        ? [longitude, latitude]
+        : null;
+
+    const locate = stored ? Promise.resolve(stored) : geocodeAddress(address);
+
+    locate.then((coords) => {
       if (destroyed) return;
       if (!coords || !containerRef.current) {
         setState("failed");
@@ -88,7 +110,7 @@ export default function VenueLocationMap({
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [address, venueName]);
+  }, [address, venueName, latitude, longitude]);
 
   return (
     <div className={state === "failed" ? "hidden" : "rounded-xl border border-line"}>

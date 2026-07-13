@@ -1,8 +1,11 @@
 import type { AuthorizedContext } from "@/lib/auth/guards";
+import { closeStaleEvents } from "@/lib/events";
+import { OCCUPYING_STATUSES } from "@/lib/scanner-core";
 import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase/admin";
 import type { Database } from "@/lib/supabase/database.types";
 
 type TicketStatus = Database["public"]["Enums"]["ticket_status"];
+type EventStatus = Database["public"]["Enums"]["event_status"];
 type StatusTone = "blue" | "green" | "warning" | "danger" | "neutral";
 type SupabaseAdmin = ReturnType<typeof createAdminClient>;
 
@@ -38,6 +41,8 @@ export type VenueStaffMember = {
 };
 
 export type VenueInfo = {
+  /** Manager-controlled pause on new guest check-ins. Not `active` (billing). */
+  acceptingCheckins: boolean;
   address: string | null;
   bagCapacity: number;
   billingCadence: "monthly" | "annual";
@@ -68,12 +73,17 @@ export type UserProfile = {
 
 export type VenueApprovalStatus = "pending" | "approved" | "rejected" | "suspended";
 
+// Events currently on the dashboard's radar: the live one (to show occupancy and
+// end), and any scheduled one due soon (to prompt the manager to start it).
 export type ActiveEvent = {
   id: string;
   name: string;
+  status: EventStatus;
   startsAt: string | null;
   endsAt: string | null;
   ticketCount: number;
+  guestCapacity: number | null;
+  guestsOccupying: number;
 };
 
 export type VenueDashboardData = {
@@ -89,6 +99,9 @@ export type VenueDashboardData = {
   search: string;
   staff: VenueStaffMember[];
   stats: Array<{ helper?: string; label: string; value: string; tone: StatusTone }>;
+  // Items currently in storage, split by pool, so the capacity bars render with
+  // real values on first paint rather than waiting for a realtime update.
+  storedByPool: { hanger: number; bag: number };
   tickets: VenueTicketListItem[];
   venue: VenueInfo | null;
   venues: VenueInfo[];
@@ -103,13 +116,82 @@ export type CustomerRow = {
   lastVisit: string;
 };
 
+export type AnalyticsEventOption = { id: string; name: string; eventDate: string };
+
+/**
+ * How many tickets a single analytics view will pull and aggregate in memory.
+ *
+ * The page derives everything (guest mix, drop-off, peaks, item types) from
+ * these rows client-side, so this is the point past which the numbers stop
+ * being the whole truth. When a period exceeds it we set `truncated` and the UI
+ * tells the user to narrow the range — rather than showing a smaller number and
+ * letting them believe it's the total.
+ *
+ * The proper fix is to push these aggregates into SQL so there's no ceiling at
+ * all; until then this is honest about its limits.
+ */
+const ANALYTICS_TICKET_CAP = 10_000;
+
+export type HourBucket = { hour: string; count: number; percent: number };
+
+/** When the counter is busy, and how long a guest's items actually sit there. */
+export type StaffingInsight = {
+  checkInPeak: string | null;
+  collectionPeak: string | null;
+  /** Median, not mean — one guest who forgets a coat for a week skews an average badly. */
+  medianTurnaroundMinutes: number | null;
+  collectionVolume: HourBucket[];
+};
+
+/** Retention. `visits` is already tracked per guest but was never surfaced. */
+export type GuestMix = {
+  newGuests: number;
+  returningGuests: number;
+  avgVisits: number;
+  topVisits: number;
+};
+
+/** Where passes leak out of the funnel. Both are directly actionable. */
+export type DropOff = {
+  /** Issued a pass, never handed anything over. High = the QR is in the wrong place. */
+  noShowCount: number;
+  noShowRate: number;
+  /** Items stored, event ended, never collected. This is the lost-property pile. */
+  forgottenCount: number;
+  forgottenRate: number;
+  /** Slots still occupied by forgotten items — capacity you aren't getting back. */
+  slotsHeldByForgotten: number;
+};
+
 export type VenueAnalyticsData = {
   byEvent: Array<{ id: string; name: string; eventDate: string; tickets: number; collected: number }>;
   customers: CustomerRow[];
-  hourlyVolume: Array<{ hour: string; count: number; percent: number }>;
+  hourlyVolume: HourBucket[];
   itemTypes: Array<{ count: number; label: string; percent: number }>;
   stats: Array<{ label: string; value: string; tone: StatusTone }>;
   venueLabel: string;
+  // Active filter state, echoed back so the UI can render the current selection.
+  dateRange: DateRange;
+  customFrom: string;
+  customTo: string;
+  eventId: string;
+  // Every event the venue has run, for the event picker.
+  eventOptions: AnalyticsEventOption[];
+  // Operational insight.
+  staffing: StaffingInsight;
+  guestMix: GuestMix;
+  dropOff: DropOff;
+  /**
+   * True when the period holds more tickets than we fetch in one pass, so every
+   * figure on the page is computed from a sample rather than the whole set.
+   *
+   * Silently reporting a truncated number as if it were the total is worse than
+   * reporting nothing — a venue would make staffing and capacity decisions on a
+   * figure that quietly stopped counting. Surfaced in the UI so the user knows
+   * to narrow the range.
+   */
+  truncated: boolean;
+  ticketsAnalyzed: number;
 };
 
 export type VenueTicketItem = {
@@ -118,7 +200,9 @@ export type VenueTicketItem = {
   quantity: number;
   notes: string | null;
   addedAt: string;
+  addedBy: string | null;
   collectedAt: string | null;
+  collectedBy: string | null;
   storageLocation: string | null;
 };
 
@@ -136,16 +220,18 @@ export type VenueTicketDetail = VenueTicketListItem & {
     reason: string | null;
     result: Database["public"]["Enums"]["scan_result"];
     scanType: Database["public"]["Enums"]["scan_type"];
+    /** Staff member who performed the scan; null if their profile was removed. */
+    staffName: string | null;
   }>;
 };
 
 export type TicketFilter = "all" | "pending" | "active" | "collected" | "forgotten";
-export type DateRange = "today" | "24h" | "7d" | "1mo" | "all" | "custom";
+export type DateRange = "today" | "24h" | "7d" | "1mo" | "1y" | "all" | "custom";
 
 export function normalizeDateRange(value: string | undefined): DateRange {
   if (
     value === "today" || value === "24h" || value === "7d" ||
-    value === "1mo" || value === "custom"
+    value === "1mo" || value === "1y" || value === "custom"
   ) return value;
   return "all";
 }
@@ -172,6 +258,12 @@ function dateRangeBounds(
   if (range === "24h") return { gte: new Date(now - 24 * 60 * 60 * 1000).toISOString(), lte: null };
   if (range === "7d") return { gte: new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString(), lte: null };
   if (range === "1mo") return { gte: new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString(), lte: null };
+  if (range === "1y") {
+    // Calendar year back, not 365 days — leap years would drift.
+    const y = new Date();
+    y.setFullYear(y.getFullYear() - 1);
+    return { gte: y.toISOString(), lte: null };
+  }
   if (range === "custom") {
     const fromDate = parseYmd(from);
     const toDate = parseYmd(to);
@@ -217,6 +309,22 @@ function buildItemSummary(
 // Per-item slot rows carry accurate collected state. Older tickets predating
 // per-item storage only have the legacy comma-joined storage_location string
 // on the ticket itself — treat those as all still occupied.
+/**
+ * Display name for the staff member on a scan or item row.
+ *
+ * The embedded profile arrives as an object or a single-element array depending
+ * on how PostgREST resolves the FK, so both are handled. Returns null when the
+ * actor is unknown — the profile may have been deleted (the FK is ON DELETE SET
+ * NULL), and an unattributed action should read as unattributed rather than
+ * silently blaming nobody in particular.
+ */
+function staffName(profile: unknown): string | null {
+  const row = Array.isArray(profile) ? profile[0] : profile;
+  if (!row || typeof row !== "object") return null;
+  const { full_name: fullName, email } = row as { full_name?: string | null; email?: string | null };
+  return fullName?.trim() || email?.trim() || null;
+}
+
 function buildSlotList(
   itemSlots: VenueTicketSlot[] | undefined,
   legacyStorageLocation: string | null,
@@ -270,6 +378,7 @@ function emptyVenueDashboardData(
       { helper: "Active storage use", label: "Capacity", value: "0%", tone: "blue" },
     ],
     profile: null,
+    storedByPool: { bag: 0, hanger: 0 },
     tickets: [],
     venue: null,
     venues: [],
@@ -289,18 +398,44 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
   return { email: data.email, fullName: data.full_name, id: data.id, phone: data.phone };
 }
 
-function emptyAnalyticsData(): VenueAnalyticsData {
+function emptyAnalyticsData(
+  dateRange: DateRange = "1mo",
+  customFrom = "",
+  customTo = "",
+  eventId = "",
+): VenueAnalyticsData {
   return {
     byEvent: [],
     customers: [],
+    customFrom,
+    customTo,
+    dateRange,
+    dropOff: {
+      forgottenCount: 0,
+      forgottenRate: 0,
+      noShowCount: 0,
+      noShowRate: 0,
+      slotsHeldByForgotten: 0,
+    },
+    eventId,
+    eventOptions: [],
+    guestMix: { avgVisits: 0, newGuests: 0, returningGuests: 0, topVisits: 0 },
     hourlyVolume: [],
     itemTypes: [],
+    staffing: {
+      checkInPeak: null,
+      collectionPeak: null,
+      collectionVolume: [],
+      medianTurnaroundMinutes: null,
+    },
     stats: [
       { label: "Guests", value: "0", tone: "neutral" },
       { label: "Collected", value: "0", tone: "green" },
       { label: "Avg. storage", value: "0m", tone: "neutral" },
       { label: "Utilization", value: "0%", tone: "warning" },
     ],
+    ticketsAnalyzed: 0,
+    truncated: false,
     venueLabel: "No assigned venue",
   };
 }
@@ -328,7 +463,7 @@ async function getVenueMeta(supabase: SupabaseAdmin, venueIds: string[] | null) 
   let query = supabase
     .from("venues")
     .select(
-      "id, name, capacity, hanger_capacity, bag_capacity, extra_devices, address, city, postal_code, contact_email, contact_phone, billing_plan, billing_cadence, cancellation_requested_at, cancellation_pay_remainder, subscription_ends_at, created_at, slug, ticket_expiry_hours",
+      "id, name, capacity, hanger_capacity, bag_capacity, extra_devices, address, city, postal_code, contact_email, contact_phone, billing_plan, billing_cadence, cancellation_requested_at, cancellation_pay_remainder, subscription_ends_at, created_at, slug, ticket_expiry_hours, accepting_checkins",
     )
     .order("name");
 
@@ -342,6 +477,7 @@ async function getVenueMeta(supabase: SupabaseAdmin, venueIds: string[] | null) 
   const first = venues[0] ?? null;
 
   const venueInfoList: VenueInfo[] = venues.map((v) => ({
+    acceptingCheckins: v.accepting_checkins ?? true,
     address: v.address,
     bagCapacity: v.bag_capacity ?? 0,
     billingCadence: v.billing_cadence,
@@ -479,10 +615,17 @@ export async function getVenueDashboardData({
 
   async function getActiveEvents(): Promise<ActiveEvent[]> {
     if (!venueIds || venueIds.length === 0) return [];
+
+    // End anything whose scheduled finish has passed, so a forgotten-to-close
+    // event doesn't sit on the dashboard claiming to be live.
+    await closeStaleEvents(venueIds);
+
+    // Scheduled events are included so the dashboard can prompt the manager to
+    // start one that's about to begin; ended ones are done and drop off.
     const { data: eventsData } = await supabase
       .from("events")
-      .select("id, name, starts_at, ends_at")
-      .eq("active", true)
+      .select("id, name, starts_at, ends_at, status, guest_capacity")
+      .in("status", ["scheduled", "live"])
       .in("venue_id", venueIds)
       .order("starts_at", { ascending: true });
     if (!eventsData || eventsData.length === 0) return [];
@@ -490,18 +633,27 @@ export async function getVenueDashboardData({
     const eventIds = eventsData.map((e) => e.id);
     const { data: ticketRows } = await supabase
       .from("tickets")
-      .select("event_id")
+      .select("event_id, status")
       .in("event_id", eventIds);
+
     const counts = new Map<string, number>();
+    const occupying = new Map<string, number>();
     (ticketRows ?? []).forEach((t) => {
-      if (t.event_id) counts.set(t.event_id, (counts.get(t.event_id) ?? 0) + 1);
+      if (!t.event_id) return;
+      counts.set(t.event_id, (counts.get(t.event_id) ?? 0) + 1);
+      if (OCCUPYING_STATUSES.includes(t.status)) {
+        occupying.set(t.event_id, (occupying.get(t.event_id) ?? 0) + 1);
+      }
     });
 
     return eventsData.map((e) => ({
+      endsAt: e.ends_at,
+      guestCapacity: e.guest_capacity,
+      guestsOccupying: occupying.get(e.id) ?? 0,
       id: e.id,
       name: e.name,
       startsAt: e.starts_at,
-      endsAt: e.ends_at,
+      status: e.status,
       ticketCount: counts.get(e.id) ?? 0,
     }));
   }
@@ -561,39 +713,56 @@ export async function getVenueDashboardData({
   const storedItemsQuery = (async () => {
     // Forgotten tickets still occupy their slots physically — the guest just
     // never came back — so they count toward capacity same as active ones.
-    let openTickets = supabase
-      .from("tickets")
-      .select("id")
-      .in("status", ["active", "partially_collected", "forgotten"]);
-    if (venueIds) openTickets = openTickets.in("venue_id", venueIds);
-    const { data: rows } = await openTickets;
-    const ticketIds = (rows ?? []).map((r) => r.id);
-    if (ticketIds.length === 0) return 0;
-
-    const { data: items } = await supabase
+    //
+    // Joined rather than fetching every open ticket id and passing it to
+    // .in(): that list is unbounded and would break the request at scale.
+    let itemsQuery = supabase
       .from("ticket_items")
-      .select("quantity")
-      .in("ticket_id", ticketIds)
+      .select("quantity, storage_location, tickets!inner(venue_id, status)")
+      .in("tickets.status", ["active", "partially_collected", "forgotten"])
       .is("collected_at", null);
-    return (items ?? []).reduce((sum, i) => sum + (i.quantity || 1), 0);
+    if (venueIds) itemsQuery = itemsQuery.in("tickets.venue_id", venueIds);
+
+    const { data } = await itemsQuery;
+    // The embedded-join select confuses the generated row types, so name the
+    // shape we actually asked for.
+    const items = (data ?? []) as unknown as Array<{
+      quantity: number;
+      storage_location: string | null;
+    }>;
+
+    // The per-pool split is returned alongside the total so the dashboard's
+    // capacity bars have real numbers on first paint. They used to be seeded
+    // with zeros and only filled in by a realtime event, so a venue with coats
+    // already on the rail saw "0 / 50 slots in use" until something changed.
+    return items.reduce(
+      (acc, i) => {
+        const n = i.quantity || 1;
+        acc.total += n;
+        if (i.storage_location?.startsWith("H-")) acc.hanger += n;
+        else if (i.storage_location?.startsWith("B-")) acc.bag += n;
+        return acc;
+      },
+      { total: 0, hanger: 0, bag: 0 },
+    );
   })();
 
   const collectedItemsTodayQuery = (async () => {
-    let venueTickets = supabase.from("tickets").select("id");
-    if (venueIds) venueTickets = venueTickets.in("venue_id", venueIds);
-    const { data: rows } = await venueTickets;
-    const ticketIds = (rows ?? []).map((r) => r.id);
-    if (ticketIds.length === 0) return 0;
-
-    const { data: items } = await supabase
+    // Joined rather than fetching every ticket id and passing it to .in():
+    // that list is unbounded, and a venue with a few hundred tickets would
+    // exceed the request URL limit and silently return nothing.
+    let itemsQuery = supabase
       .from("ticket_items")
-      .select("quantity")
-      .in("ticket_id", ticketIds)
+      .select("quantity, tickets!inner(venue_id)")
       .gte("collected_at", todayStart);
-    return (items ?? []).reduce((sum, i) => sum + (i.quantity || 1), 0);
+    if (venueIds) itemsQuery = itemsQuery.in("tickets.venue_id", venueIds);
+
+    const { data } = await itemsQuery;
+    const items = (data ?? []) as unknown as Array<{ quantity: number }>;
+    return items.reduce((sum, i) => sum + (i.quantity || 1), 0);
   })();
 
-  const [todayCount, pendingCount, forgottenCount, ticketRows, storedItemCount, collectedItemCountToday] =
+  const [todayCount, pendingCount, forgottenCount, ticketRows, storedItems, collectedItemCountToday] =
     await Promise.all([
       scopedCount().gte("created_at", todayStart),
       scopedCount().eq("status", "pending_activation"),
@@ -605,6 +774,7 @@ export async function getVenueDashboardData({
       collectedItemsTodayQuery,
     ]);
 
+  const storedItemCount = storedItems.total;
   const usedCapacity = storedItemCount;
   const utilization = venueMeta.capacity > 0 ? Math.round((usedCapacity / venueMeta.capacity) * 100) : 0;
 
@@ -679,6 +849,7 @@ export async function getVenueDashboardData({
         tone: utilization >= 90 ? "danger" : utilization >= 70 ? "warning" : "blue",
       },
     ],
+    storedByPool: { bag: storedItems.bag, hanger: storedItems.hanger },
     tickets:
       (ticketRows.data ?? [])
         .map((t) => ({
@@ -730,20 +901,48 @@ export async function getVenueTicketDetail({
 
   const [venueNames, scans, items, eventRow] = await Promise.all([
     getVenueNameMap(supabase, [ticket.venue_id]),
+    // scanned_by has always been recorded but was never read. In a dispute
+    // ("my coat is missing") the first question is who handled it, so the
+    // scanning staff member's name is joined in and surfaced on the timeline.
     supabase
       .from("ticket_scans")
-      .select("id, scan_type, result, reason, created_at")
+      .select("id, scan_type, result, reason, created_at, profiles:scanned_by(full_name, email)")
       .eq("ticket_id", ticket.id)
       .order("created_at", { ascending: true }),
     supabase
       .from("ticket_items")
-      .select("id, label, quantity, notes, added_at, collected_at, storage_location")
+      .select(
+        "id, label, quantity, notes, added_at, collected_at, storage_location, added_by_profile:added_by(full_name, email), collected_by_profile:collected_by(full_name, email)",
+      )
       .eq("ticket_id", ticket.id)
       .order("added_at", { ascending: true }),
     ticket.event_id
       ? supabase.from("events").select("name").eq("id", ticket.event_id).maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
+
+  // The aliased profile embeds defeat the generated row types, so name the
+  // shapes we actually selected.
+  type StaffRef = { full_name: string | null; email: string | null } | null;
+  const scanRows = (scans.data ?? []) as unknown as Array<{
+    id: string;
+    scan_type: Database["public"]["Enums"]["scan_type"];
+    result: Database["public"]["Enums"]["scan_result"];
+    reason: string | null;
+    created_at: string;
+    profiles: StaffRef;
+  }>;
+  const itemRows = (items.data ?? []) as unknown as Array<{
+    id: string;
+    label: string;
+    quantity: number;
+    notes: string | null;
+    added_at: string;
+    collected_at: string | null;
+    storage_location: string | null;
+    added_by_profile: StaffRef;
+    collected_by_profile: StaffRef;
+  }>;
 
   return {
     activatedAt: ticket.activated_at,
@@ -758,33 +957,34 @@ export async function getVenueTicketDetail({
     itemCount: ticket.item_count,
     itemDescription: ticket.item_description,
     itemSummary: buildItemSummary(
-      (items.data ?? []).map((i) => ({ label: i.label, quantity: i.quantity })),
+      itemRows.map((i) => ({ label: i.label, quantity: i.quantity })),
       ticket.item_type,
       ticket.item_count,
     ),
     lastActivityAt: ticket.collected_at ?? ticket.activated_at ?? ticket.created_at,
-    items:
-      items.data?.map((i) => ({
-        addedAt: i.added_at,
-        collectedAt: i.collected_at,
-        id: i.id,
-        label: i.label,
-        notes: i.notes,
-        quantity: i.quantity,
-        storageLocation: i.storage_location ?? null,
-      })) ?? [],
+    items: itemRows.map((i) => ({
+      addedAt: i.added_at,
+      addedBy: staffName(i.added_by_profile),
+      collectedAt: i.collected_at,
+      collectedBy: staffName(i.collected_by_profile),
+      id: i.id,
+      label: i.label,
+      notes: i.notes,
+      quantity: i.quantity,
+      storageLocation: i.storage_location ?? null,
+    })),
     itemType: ticket.item_type,
     publicCode: ticket.public_code,
-    scans:
-      scans.data?.map((s) => ({
-        createdAt: s.created_at,
-        id: s.id,
-        reason: s.reason,
-        result: s.result,
-        scanType: s.scan_type,
-      })) ?? [],
+    scans: scanRows.map((s) => ({
+      createdAt: s.created_at,
+      id: s.id,
+      reason: s.reason,
+      result: s.result,
+      scanType: s.scan_type,
+      staffName: staffName(s.profiles),
+    })),
     slots: buildSlotList(
-      (items.data ?? [])
+      itemRows
         .filter((i) => i.storage_location)
         .map((i) => ({ label: i.storage_location as string, collected: i.collected_at !== null })),
       ticket.storage_location,
@@ -795,27 +995,62 @@ export async function getVenueTicketDetail({
   };
 }
 
-export async function getVenueAnalyticsData(context: AuthorizedContext): Promise<VenueAnalyticsData> {
-  if (!isSupabaseAdminConfigured()) return emptyAnalyticsData();
+export async function getVenueAnalyticsData(
+  context: AuthorizedContext,
+  filters: { range?: string; from?: string; to?: string; eventId?: string } = {},
+): Promise<VenueAnalyticsData> {
+  // Default to the last month. The page used to hardcode 7 days, which on a
+  // venue that runs weekly events routinely showed an empty page — a month is
+  // wide enough to always have something to look at.
+  const dateRange = normalizeDateRange(filters.range ?? "1mo");
+  const customFrom = dateRange === "custom" ? (filters.from ?? "") : "";
+  const customTo = dateRange === "custom" ? (filters.to ?? "") : "";
+  const eventId = filters.eventId ?? "";
+
+  if (!isSupabaseAdminConfigured()) {
+    return emptyAnalyticsData(dateRange, customFrom, customTo, eventId);
+  }
 
   const venueIds = getVenueIds(context);
-  if (venueIds?.length === 0) return emptyAnalyticsData();
+  if (venueIds?.length === 0) {
+    return emptyAnalyticsData(dateRange, customFrom, customTo, eventId);
+  }
 
   const supabase = createAdminClient();
   const venueMeta = await getVenueMeta(supabase, venueIds);
-  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
+  // Every event the venue has run, so the picker can offer them all — not just
+  // the ones that happen to fall inside the current date window.
+  const eventOptions = await getAnalyticsEventOptions(supabase, venueIds);
+
+  // Scoping to a single event makes the date range irrelevant: the event IS the
+  // window. Ignore the range so "Bollywood Night" doesn't silently show nothing
+  // just because it fell outside the default 7 days.
+  const scopedToEvent = Boolean(eventId);
+  const { gte, lte } = scopedToEvent
+    ? { gte: null, lte: null }
+    : dateRangeBounds(dateRange, customFrom, customTo);
+
+  // Every figure on this page is derived in JS from these rows, so the cap is a
+  // real correctness boundary, not just a performance knob. Fetch one MORE than
+  // we're willing to analyse: if it comes back, we know the period overflows and
+  // can say so rather than quietly reporting a partial count as the total.
   let q = supabase
     .from("tickets")
     .select("id, created_at, activated_at, collected_at, status, item_type, event_id, guest_name, guest_email, guest_phone")
-    .gte("created_at", since)
     .order("created_at", { ascending: true })
-    .limit(500);
+    .limit(ANALYTICS_TICKET_CAP + 1);
 
   if (venueIds) q = q.in("venue_id", venueIds);
+  if (gte) q = q.gte("created_at", gte);
+  if (lte) q = q.lte("created_at", lte);
+  if (eventId) q = q.eq("event_id", eventId);
 
   const { data: recentTickets } = await q;
-  const tickets = recentTickets ?? [];
+  const fetched = recentTickets ?? [];
+  const truncated = fetched.length > ANALYTICS_TICKET_CAP;
+  const tickets = truncated ? fetched.slice(0, ANALYTICS_TICKET_CAP) : fetched;
+
   const guests = tickets.length;
   const collected = tickets.filter((t) => t.status === "collected").length;
   const active = tickets.filter(
@@ -834,14 +1069,26 @@ export async function getVenueAnalyticsData(context: AuthorizedContext): Promise
   const utilization = venueMeta.capacity > 0 ? Math.round((active / venueMeta.capacity) * 100) : 0;
 
   // Item types from per-item rows (more accurate than the denormalized blob).
-  const ticketIds = tickets.map((t) => t.id);
+  //
+  // Filtered through a join on tickets rather than by passing every ticket id to
+  // .in(): that list is unbounded, and at a few thousand tickets the request URL
+  // would blow past the length limit and fail — taking the item mix down with it.
   let itemTypes: VenueAnalyticsData["itemTypes"];
-  if (ticketIds.length > 0) {
-    const { data: itemRows } = await supabase
+  if (tickets.length > 0) {
+    let itemQuery = supabase
       .from("ticket_items")
-      .select("label, quantity")
-      .in("ticket_id", ticketIds);
-    if (itemRows && itemRows.length > 0) {
+      .select("label, quantity, tickets!inner(venue_id, event_id, created_at)");
+
+    if (venueIds) itemQuery = itemQuery.in("tickets.venue_id", venueIds);
+    if (eventId) itemQuery = itemQuery.eq("tickets.event_id", eventId);
+    if (gte) itemQuery = itemQuery.gte("tickets.created_at", gte);
+    if (lte) itemQuery = itemQuery.lte("tickets.created_at", lte);
+
+    const { data } = await itemQuery;
+    // The embedded join defeats the generated row types.
+    const itemRows = (data ?? []) as unknown as Array<{ label: string; quantity: number }>;
+
+    if (itemRows.length > 0) {
       itemTypes = buildItemTypesFromRows(itemRows);
     } else {
       itemTypes = buildItemTypes(tickets.map((t) => t.item_type));
@@ -875,11 +1122,41 @@ export async function getVenueAnalyticsData(context: AuthorizedContext): Promise
     (a, b) => new Date(b.lastVisit).getTime() - new Date(a.lastVisit).getTime(),
   );
 
+  // Slots still tied up by items nobody came back for — capacity the venue
+  // isn't getting back until someone physically clears the rail. Joined rather
+  // than passing an id list, for the same URL-length reason as above.
+  let slotsHeldByForgotten = 0;
+  if (tickets.some((t) => t.status === "forgotten")) {
+    let heldQuery = supabase
+      .from("ticket_items")
+      .select("quantity, tickets!inner(venue_id, status)")
+      .eq("tickets.status", "forgotten")
+      .is("collected_at", null);
+    if (venueIds) heldQuery = heldQuery.in("tickets.venue_id", venueIds);
+
+    const { data } = await heldQuery;
+    const heldItems = (data ?? []) as unknown as Array<{ quantity: number }>;
+    slotsHeldByForgotten = heldItems.reduce((sum, i) => sum + (i.quantity || 1), 0);
+  }
+
+  const hourlyVolume = buildHourlyVolume(tickets.map((t) => t.created_at));
+  const staffing = buildStaffingInsight(tickets, hourlyVolume);
+  const guestMix = buildGuestMix(customers);
+  const dropOff = buildDropOff(tickets, slotsHeldByForgotten);
+
   return {
     byEvent,
     customers,
-    hourlyVolume: buildHourlyVolume(tickets.map((t) => t.created_at)),
+    customFrom,
+    customTo,
+    dateRange,
+    dropOff,
+    eventId,
+    eventOptions,
+    guestMix,
+    hourlyVolume,
     itemTypes,
+    staffing,
     stats: [
       { label: "Guests", value: formatCount(guests), tone: "neutral" },
       { label: "Collected", value: formatCount(collected), tone: "green" },
@@ -890,8 +1167,31 @@ export async function getVenueAnalyticsData(context: AuthorizedContext): Promise
         tone: utilization >= 90 ? "danger" : utilization >= 70 ? "warning" : "neutral",
       },
     ],
+    ticketsAnalyzed: tickets.length,
+    truncated,
     venueLabel: venueMeta.label,
   };
+}
+
+/** Every event the venue has run, newest first — populates the analytics event picker. */
+async function getAnalyticsEventOptions(
+  supabase: SupabaseAdmin,
+  venueIds: string[] | null,
+): Promise<AnalyticsEventOption[]> {
+  let q = supabase
+    .from("events")
+    .select("id, name, event_date")
+    .order("event_date", { ascending: false })
+    .limit(100);
+
+  if (venueIds) q = q.in("venue_id", venueIds);
+
+  const { data } = await q;
+  return (data ?? []).map((e) => ({
+    eventDate: e.event_date,
+    id: e.id,
+    name: e.name,
+  }));
 }
 
 async function buildEventBreakdown(
@@ -944,6 +1244,101 @@ function buildHourlyVolume(values: string[]) {
   });
   const max = Math.max(...counts.map((c) => c.count), 1);
   return counts.map((c) => ({ ...c, percent: Math.max(8, Math.round((c.count / max) * 100)) }));
+}
+
+/** Label of the busiest 3-hour block, or null when there's no activity at all. */
+function peakOf(buckets: HourBucket[]): string | null {
+  const best = buckets.reduce<HourBucket | null>(
+    (top, b) => (!top || b.count > top.count ? b : top),
+    null,
+  );
+  if (!best || best.count === 0) return null;
+  const startHour = parseInt(best.hour.slice(0, 2), 10);
+  const endHour = (startHour + 3) % 24;
+  return `${best.hour}–${String(endHour).padStart(2, "0")}:00`;
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+type AnalyticsTicket = {
+  status: TicketStatus;
+  created_at: string;
+  activated_at: string | null;
+  collected_at: string | null;
+};
+
+function buildStaffingInsight(
+  tickets: AnalyticsTicket[],
+  checkInVolume: HourBucket[],
+): StaffingInsight {
+  const collectionVolume = buildHourlyVolume(
+    tickets.filter((t) => t.collected_at).map((t) => t.collected_at as string),
+  );
+
+  // Turnaround = how long the items actually sat in the cloakroom. Median rather
+  // than mean: a single guest who leaves a coat for a week would otherwise drag
+  // the "typical" figure somewhere useless for rostering.
+  const turnarounds = tickets
+    .filter((t) => t.activated_at && t.collected_at)
+    .map(
+      (t) =>
+        (new Date(t.collected_at as string).getTime() -
+          new Date(t.activated_at as string).getTime()) /
+        60000,
+    )
+    .filter((m) => m >= 0);
+
+  return {
+    checkInPeak: peakOf(checkInVolume),
+    collectionPeak: peakOf(collectionVolume),
+    collectionVolume,
+    medianTurnaroundMinutes: median(turnarounds),
+  };
+}
+
+function buildGuestMix(customers: CustomerRow[]): GuestMix {
+  const returningGuests = customers.filter((c) => c.visits > 1).length;
+  const totalVisits = customers.reduce((sum, c) => sum + c.visits, 0);
+
+  return {
+    avgVisits: customers.length > 0 ? totalVisits / customers.length : 0,
+    newGuests: customers.length - returningGuests,
+    returningGuests,
+    topVisits: customers.reduce((max, c) => Math.max(max, c.visits), 0),
+  };
+}
+
+function buildDropOff(tickets: AnalyticsTicket[], slotsHeldByForgotten: number): DropOff {
+  const total = tickets.length;
+
+  // A no-show is a pass that was issued and never activated — the guest either
+  // didn't come, or couldn't find the counter. Only count ones that can no
+  // longer be activated (expired or explicitly forgotten); a pass still pending
+  // on a live night hasn't failed yet, it just hasn't happened.
+  const noShowCount = tickets.filter(
+    (t) => !t.activated_at && (t.status === "expired" || t.status === "forgotten"),
+  ).length;
+
+  // Forgotten = items were stored and never came back for. This is the pile of
+  // lost property the venue has to physically deal with.
+  const forgottenCount = tickets.filter(
+    (t) => t.status === "forgotten" && t.activated_at !== null,
+  ).length;
+
+  const rate = (n: number) => (total > 0 ? Math.round((n / total) * 100) : 0);
+
+  return {
+    forgottenCount,
+    forgottenRate: rate(forgottenCount),
+    noShowCount,
+    noShowRate: rate(noShowCount),
+    slotsHeldByForgotten,
+  };
 }
 
 function buildItemTypes(values: Array<string | null>) {

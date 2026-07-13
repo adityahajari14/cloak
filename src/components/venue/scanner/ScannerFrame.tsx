@@ -2,12 +2,27 @@
 
 import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 import { handleScannerAction, searchPendingTickets, type PendingTicketSuggestion } from "@/app/venuescanner/actions";
-import { initialScannerState } from "@/app/venuescanner/types";
+import { initialScannerState, type ScannerTicket } from "@/app/venuescanner/types";
 import CameraScanner from "./CameraScanner";
-import { ActivationForm, CheckoutForm, GuestCard } from "./TicketActionForms";
+import { ActivationForm, CheckoutForm, GuestCard, StorageLocationCard } from "./TicketActionForms";
 
 const AUTO_RESET_MS = 5000;
 const FLASH_DURATION_MS = 1500;
+
+/**
+ * True when the guest has items sitting in the cloakroom with a slot assigned.
+ *
+ * The scanner auto-returns to the camera after a success, which is right for a
+ * checkout (nothing left to read) but wrong the moment items go INTO storage:
+ * staff have to read the hanger/bag number off the screen before they can put
+ * the coat anywhere. Those results stay up until they're explicitly dismissed.
+ */
+function hasStorageToShow(ticket: ScannerTicket | undefined): boolean {
+  if (!ticket) return false;
+  if (ticket.items.some((i) => !i.collected && i.storageLocation)) return true;
+  // Legacy tickets predate per-item slot rows.
+  return ticket.items.length === 0 && Boolean(ticket.storageLocation);
+}
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
@@ -20,16 +35,25 @@ export default function ScannerFrame({ venueId }: { venueId?: string }) {
   const [suggestions, setSuggestions] = useState<PendingTicketSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
+  const successTicket = state.status === "success" && "ticket" in state ? state.ticket : undefined;
+  const showsStorage = hasStorageToShow(successTicket);
+
   useEffect(() => {
     if (state.status === "success") {
       setFlashTone("success");
       setTimeout(() => setFlashTone(null), FLASH_DURATION_MS);
-      resetTimerRef.current = setTimeout(() => {
-        const fd = new FormData();
-        fd.set("_action", "reset");
-        startTransition(() => formAction(fd));
-        if (inputRef.current) inputRef.current.value = "";
-      }, AUTO_RESET_MS);
+
+      // Items just went into storage — hold the slot numbers on screen until
+      // staff dismiss them. Auto-clearing here loses the only record of where
+      // the coat is supposed to go.
+      if (!showsStorage) {
+        resetTimerRef.current = setTimeout(() => {
+          const fd = new FormData();
+          fd.set("_action", "reset");
+          startTransition(() => formAction(fd));
+          if (inputRef.current) inputRef.current.value = "";
+        }, AUTO_RESET_MS);
+      }
     } else if (state.status === "error") {
       setFlashTone("error");
       setTimeout(() => setFlashTone(null), FLASH_DURATION_MS);
@@ -37,7 +61,7 @@ export default function ScannerFrame({ venueId }: { venueId?: string }) {
     return () => {
       if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
     };
-  }, [state.status, state.message, formAction]);
+  }, [state.status, state.message, formAction, showsStorage]);
 
   function handleCameraDetection(value: string) {
     if (inputRef.current) inputRef.current.value = value;
@@ -88,6 +112,10 @@ export default function ScannerFrame({ venueId }: { venueId?: string }) {
   // mobile and desktop — scanning and acting on a ticket never share a view.
   const ticketReady = (isActivation || isCheckout) && ticket;
 
+  // Items were just stored: this gets its own full step too, because the slot
+  // numbers on it are what the staff member has to act on next.
+  const storageReady = isSuccess && showsStorage && ticket;
+
   function scanAgain() {
     const fd = new FormData();
     fd.set("_action", "reset");
@@ -106,7 +134,24 @@ export default function ScannerFrame({ venueId }: { venueId?: string }) {
         />
       )}
 
-      {ticketReady ? (
+      {storageReady ? (
+        // ── Storage result — stays up until dismissed ─────────────────────────
+        <div className="mx-auto max-w-lg space-y-4">
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+            {state.message}
+          </div>
+
+          <StorageLocationCard ticket={ticket} />
+
+          <button
+            className="w-full rounded-xl bg-foreground px-6 py-3.5 text-sm font-semibold text-white transition hover:opacity-90"
+            onClick={scanAgain}
+            type="button"
+          >
+            Done — scan next guest
+          </button>
+        </div>
+      ) : ticketReady ? (
         // ── Dedicated ticket screen — fully replaces the camera view ──────────
         <div className="mx-auto max-w-lg space-y-4">
           <button
@@ -182,6 +227,8 @@ export default function ScannerFrame({ venueId }: { venueId?: string }) {
               </div>
             ) : null}
 
+            {/* Checkouts only — a storage result takes over the whole view above
+                and waits to be dismissed. */}
             {isSuccess && state.message ? (
               <div className="space-y-3">
                 <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">

@@ -3,40 +3,39 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase/admin";
 import { requireVenueAccess } from "@/lib/auth/guards";
+import {
+  endEvent as endEventCore,
+  resetEvent as resetEventCore,
+  startEvent as startEventCore,
+} from "@/lib/events";
 
-export async function endEvent(eventId: string): Promise<void> {
-  if (!isSupabaseAdminConfigured()) return;
+function revalidateEventSurfaces() {
+  revalidatePath("/venuedashboard");
+  revalidatePath("/venueevents");
+}
 
+export async function startEvent(eventId: string): Promise<void> {
   const guard = await requireVenueAccess("/venuedashboard");
   if (guard.status !== "authorized") return;
 
-  const allowedVenueIds = guard.venueRoles
-    .filter((r) => r.role === "manager")
-    .map((r) => r.venueId);
-  if (allowedVenueIds.length === 0) return;
+  await startEventCore(eventId, guard);
+  revalidateEventSurfaces();
+}
 
-  const supabase = createAdminClient();
+export async function endEvent(eventId: string): Promise<void> {
+  const guard = await requireVenueAccess("/venuedashboard");
+  if (guard.status !== "authorized") return;
 
-  // Mark event as inactive
-  await supabase
-    .from("events")
-    .update({ active: false })
-    .eq("id", eventId)
-    .in("venue_id", allowedVenueIds);
+  await endEventCore(eventId, guard);
+  revalidateEventSurfaces();
+}
 
-  // Mark every ticket on this event that never made it to "collected" as
-  // forgotten — whether it was never activated, still fully stored, or only
-  // partially returned. Items may still be sitting in the cloakroom; staff
-  // can still check them out normally, "forgotten" just flags that the event
-  // ended without the guest coming back for them.
-  await supabase
-    .from("tickets")
-    .update({ status: "forgotten" })
-    .eq("event_id", eventId)
-    .in("status", ["pending_activation", "active", "partially_collected"])
-    .in("venue_id", allowedVenueIds);
+export async function resetEvent(eventId: string): Promise<void> {
+  const guard = await requireVenueAccess("/venuedashboard");
+  if (guard.status !== "authorized") return;
 
-  revalidatePath("/venuedashboard");
+  await resetEventCore(eventId, guard);
+  revalidateEventSurfaces();
 }
 
 

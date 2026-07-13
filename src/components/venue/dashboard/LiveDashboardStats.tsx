@@ -116,7 +116,12 @@ export default function LiveDashboardStats({
       // been explicitly ended yet.
       const occupyingStatuses = ["active", "partially_collected", "forgotten"] as const;
 
-      const [pending, all, occupiedItems, allVenueTickets] = await Promise.all([
+      // Item counts are filtered through an inner join on tickets rather than by
+      // fetching every ticket id and passing it to .in(). That id list was
+      // unbounded — a venue with a few hundred tickets would blow past the URL
+      // length limit, the request would fail, and the counters would quietly
+      // read 0. It's also one query instead of two.
+      const [pending, all, forgottenResult, storedResult, collectedTodayResult] = await Promise.all([
         supabase
           .from("tickets")
           .select("id", { count: "exact", head: true })
@@ -127,65 +132,48 @@ export default function LiveDashboardStats({
           .select("id", { count: "exact", head: true })
           .eq("venue_id", venueId!)
           .gte("created_at", today),
-        // Occupying ticket IDs to join against ticket_items for stored/capacity counts
         supabase
           .from("tickets")
-          .select("id")
+          .select("id", { count: "exact", head: true })
           .eq("venue_id", venueId!)
-          .in("status", occupyingStatuses),
-        // All venue ticket IDs, to sum items collected today across any ticket
-        // (including partially_collected ones)
+          .or(`status.eq.forgotten,and(status.eq.pending_activation,expires_at.lt.${now})`),
+        // Items physically in storage right now.
         supabase
-          .from("tickets")
-          .select("id")
-          .eq("venue_id", venueId!),
+          .from("ticket_items")
+          .select("storage_location, quantity, tickets!inner(venue_id, status)")
+          .eq("tickets.venue_id", venueId!)
+          .in("tickets.status", occupyingStatuses)
+          .is("collected_at", null),
+        // Items handed back today, across every ticket — including partially
+        // collected ones, where the ticket itself is still open.
+        supabase
+          .from("ticket_items")
+          .select("quantity, tickets!inner(venue_id)")
+          .eq("tickets.venue_id", venueId!)
+          .gte("collected_at", today),
       ]);
 
-      const forgottenCountPromise = supabase
-        .from("tickets")
-        .select("id", { count: "exact", head: true })
-        .eq("venue_id", venueId!)
-        .or(`status.eq.forgotten,and(status.eq.pending_activation,expires_at.lt.${now})`);
+      const qty = (i: { quantity: number }) => i.quantity || 1;
 
-      const occupyingIds = (occupiedItems.data ?? []).map((t) => t.id);
-      const allTicketIds = (allVenueTickets.data ?? []).map((t) => t.id);
+      // The embedded-join select confuses the generated row types, so name the
+      // shape we actually asked for.
+      const itemRows = (storedResult.data ?? []) as unknown as Array<{
+        quantity: number;
+        storage_location: string | null;
+      }>;
+      const collectedRows = (collectedTodayResult.data ?? []) as unknown as Array<{
+        quantity: number;
+      }>;
 
-      let hangerStored = 0;
-      let bagStored = 0;
-      let storedItemCount = 0;
-
-      const [itemRowsResult, forgottenResult, collectedTodayResult] = await Promise.all([
-        occupyingIds.length > 0
-          ? supabase
-              .from("ticket_items")
-              .select("storage_location, quantity")
-              .in("ticket_id", occupyingIds)
-              .not("storage_location", "is", null)
-              .is("collected_at", null)
-          : Promise.resolve({ data: [] as Array<{ storage_location: string | null; quantity: number }> }),
-        forgottenCountPromise,
-        allTicketIds.length > 0
-          ? supabase
-              .from("ticket_items")
-              .select("quantity")
-              .in("ticket_id", allTicketIds)
-              .gte("collected_at", today)
-          : Promise.resolve({ data: [] as Array<{ quantity: number }> }),
-      ]);
-
-      const itemRows = itemRowsResult.data ?? [];
-      hangerStored = itemRows
+      const storedItemCount = itemRows.reduce((sum, i) => sum + qty(i), 0);
+      const hangerStored = itemRows
         .filter((i) => i.storage_location?.startsWith("H-"))
-        .reduce((sum, i) => sum + (i.quantity || 1), 0);
-      bagStored = itemRows
+        .reduce((sum, i) => sum + qty(i), 0);
+      const bagStored = itemRows
         .filter((i) => i.storage_location?.startsWith("B-"))
-        .reduce((sum, i) => sum + (i.quantity || 1), 0);
-      storedItemCount = itemRows.reduce((sum, i) => sum + (i.quantity || 1), 0);
+        .reduce((sum, i) => sum + qty(i), 0);
 
-      const collectedItemCountToday = (collectedTodayResult.data ?? []).reduce(
-        (sum, i) => sum + (i.quantity || 1),
-        0,
-      );
+      const collectedItemCountToday = collectedRows.reduce((sum, i) => sum + qty(i), 0);
 
       setCounts((prev) => ({
         ...prev,
@@ -199,11 +187,28 @@ export default function LiveDashboardStats({
       }));
     }
 
+    // Paint the server's numbers immediately, then keep them live.
+    refresh();
+
     const channel = supabase
       .channel(`dashboard:${venueId}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "tickets", filter: `venue_id=eq.${venueId}` },
+        () => { refresh(); },
+      )
+      // Storing and collecting items writes ticket_items, not tickets. Watching
+      // only the tickets table meant a partial collection — which updates
+      // ticket_items.collected_at and leaves tickets.status on
+      // "partially_collected" — changed no tickets row at all, so no event
+      // fired and the stored/collected/capacity counters silently went stale.
+      //
+      // ticket_items has no venue_id to filter on, so this listens to the whole
+      // table and refreshes; refresh() is already venue-scoped, so a change at
+      // another venue just costs one redundant re-query.
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "ticket_items" },
         () => { refresh(); },
       )
       .subscribe();

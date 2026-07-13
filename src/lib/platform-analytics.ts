@@ -10,6 +10,8 @@ export type MonthBucket = { month: string; label: string };
 
 export type PlatformAnalyticsData = {
   scope: AnalyticsScope;
+  /** How many months back the trend charts cover — echoed back for the picker. */
+  monthWindow: MonthWindow;
   venueOptions: Array<{ id: string; name: string }>;
 
   // Revenue
@@ -41,11 +43,28 @@ function monthLabel(date: Date): string {
   return new Intl.DateTimeFormat("en-GB", { month: "short", year: "2-digit" }).format(date);
 }
 
-/** Last 12 calendar months, oldest first, ending with the current month. */
-function last12Months(): MonthBucket[] {
+/**
+ * How far back the platform charts look.
+ *
+ * These series (MRR, signups vs cancellations, ticket trend) are inherently
+ * month-bucketed, so the window is expressed in months rather than the
+ * day/week/custom range the venue analytics uses — a "last 7 days" view of a
+ * monthly MRR trend would be a single bar, which tells nobody anything.
+ */
+export const MONTH_WINDOWS = [3, 6, 12, 24] as const;
+export type MonthWindow = (typeof MONTH_WINDOWS)[number];
+export const DEFAULT_MONTH_WINDOW: MonthWindow = 12;
+
+export function normalizeMonthWindow(value: string | undefined): MonthWindow {
+  const n = Number(value);
+  return (MONTH_WINDOWS as readonly number[]).includes(n) ? (n as MonthWindow) : DEFAULT_MONTH_WINDOW;
+}
+
+/** The last `count` calendar months, oldest first, ending with the current month. */
+function lastMonths(count: number): MonthBucket[] {
   const buckets: MonthBucket[] = [];
   const now = new Date();
-  for (let i = 11; i >= 0; i--) {
+  for (let i = count - 1; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     buckets.push({ month: monthKey(d), label: monthLabel(d) });
   }
@@ -64,9 +83,13 @@ function monthlyEquivalent(plan: string | null, cadence: "monthly" | "annual"): 
   return cadence === "annual" ? (monthly * 11) / 12 : monthly;
 }
 
-function emptyData(scope: AnalyticsScope): PlatformAnalyticsData {
-  const months = last12Months();
+function emptyData(
+  scope: AnalyticsScope,
+  monthWindow: MonthWindow = DEFAULT_MONTH_WINDOW,
+): PlatformAnalyticsData {
+  const months = lastMonths(monthWindow);
   return {
+    monthWindow,
     activationRate: 0,
     activeVenueCount: 0,
     avgStorageHours: null,
@@ -84,12 +107,20 @@ function emptyData(scope: AnalyticsScope): PlatformAnalyticsData {
   };
 }
 
-export async function getPlatformAnalyticsData(scope: AnalyticsScope): Promise<PlatformAnalyticsData> {
-  if (!isSupabaseAdminConfigured()) return emptyData(scope);
+export async function getPlatformAnalyticsData(
+  scope: AnalyticsScope,
+  monthWindow: MonthWindow = DEFAULT_MONTH_WINDOW,
+): Promise<PlatformAnalyticsData> {
+  if (!isSupabaseAdminConfigured()) return emptyData(scope, monthWindow);
 
   const supabase = createAdminClient();
-  const months = last12Months();
-  const rangeStart = new Date(new Date().getFullYear(), new Date().getMonth() - 11, 1).toISOString();
+  const months = lastMonths(monthWindow);
+  const now = new Date();
+  const rangeStart = new Date(
+    now.getFullYear(),
+    now.getMonth() - (monthWindow - 1),
+    1,
+  ).toISOString();
 
   // ── Venue options for the scope picker (always unscoped) ──────────────────
   const { data: venueOptionRows } = await supabase.from("venues").select("id, name").order("name");
@@ -231,6 +262,7 @@ export async function getPlatformAnalyticsData(scope: AnalyticsScope): Promise<P
   }));
 
   return {
+    monthWindow,
     activationRate,
     activeVenueCount: venues.filter((v) => v.active).length,
     avgStorageHours,

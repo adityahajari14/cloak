@@ -294,6 +294,50 @@ export async function updateVenueExpiry(formData: FormData) {
   finish(enabled ? `Tickets now expire after ${ticketExpiryHours} hours.` : "Ticket expiry disabled.", venueId);
 }
 
+/**
+ * Pause or resume new guest check-ins.
+ *
+ * Writes `accepting_checkins`, deliberately not `active`: `active` is the
+ * platform's switch (constrained against billing status, and how an admin
+ * suspends a venue). This one belongs to the manager — the cloakroom is full,
+ * or the counter is closed — and never touches account standing.
+ *
+ * Pausing does not affect items already stored: guests can still collect, and
+ * staff can still scan. It only stops new tickets being created.
+ */
+export async function updateVenueAcceptingCheckins(formData: FormData) {
+  const guard = await requireVenueAccess("/venuesettings", ["manager"]);
+
+  if (guard.status !== "authorized" || !isSupabaseAdminConfigured()) {
+    fail("Check-in settings are temporarily unavailable.");
+  }
+
+  const venueId =
+    readField(formData, "venueId") || guard.venueRoles.find((r) => r.role === "manager")?.venueId;
+  if (!venueId || !guard.venueRoles.some((r) => r.venueId === venueId && r.role === "manager")) {
+    fail("No managed venue was found for this account.");
+  }
+
+  const accepting = readField(formData, "acceptingCheckins") === "1";
+
+  const supabase = createAdminClient();
+  const { error } = await supabase
+    .from("venues")
+    .update({ accepting_checkins: accepting })
+    .eq("id", venueId);
+
+  if (error) fail("Could not update check-in settings. Please try again.", venueId);
+
+  revalidatePath("/venuesettings");
+  revalidatePath("/venuedashboard");
+  finish(
+    accepting
+      ? "Venue is active — now accepting new check-ins."
+      : "Check-ins paused. Guests can still collect stored items.",
+    venueId,
+  );
+}
+
 // ─── Subscription cancellation ─────────────────────────────────────────────────
 
 export type CancellationPreview = {

@@ -12,6 +12,7 @@ export type Database = {
         | "past_due"
         | "canceled"
         | "unpaid";
+      event_status: "scheduled" | "live" | "ended";
       profile_role: "guest" | "platform_admin";
       scan_result: "accepted" | "rejected";
       scan_type: "activation" | "checkout" | "rejected";
@@ -58,31 +59,43 @@ export type Database = {
         Row: {
           active: boolean;
           created_at: string;
+          ended_at: string | null;
           ends_at: string | null;
           event_date: string;
+          guest_capacity: number | null;
           id: string;
           name: string;
+          started_at: string | null;
           starts_at: string | null;
+          status: Database["public"]["Enums"]["event_status"];
           venue_id: string;
         };
         Insert: {
           active?: boolean;
           created_at?: string;
+          ended_at?: string | null;
           ends_at?: string | null;
           event_date: string;
+          guest_capacity?: number | null;
           id?: string;
           name: string;
+          started_at?: string | null;
           starts_at?: string | null;
+          status?: Database["public"]["Enums"]["event_status"];
           venue_id: string;
         };
         Update: {
           active?: boolean;
           created_at?: string;
+          ended_at?: string | null;
           ends_at?: string | null;
           event_date?: string;
+          guest_capacity?: number | null;
           id?: string;
           name?: string;
+          started_at?: string | null;
           starts_at?: string | null;
+          status?: Database["public"]["Enums"]["event_status"];
           venue_id?: string;
         };
         Relationships: [];
@@ -383,6 +396,7 @@ export type Database = {
       };
       venues: {
         Row: {
+          accepting_checkins: boolean;
           active: boolean;
           address: string | null;
           billing_cadence: "monthly" | "annual";
@@ -414,6 +428,7 @@ export type Database = {
           updated_at: string;
         };
         Insert: {
+          accepting_checkins?: boolean;
           active?: boolean;
           address?: string | null;
           billing_cadence?: "monthly" | "annual";
@@ -445,6 +460,7 @@ export type Database = {
           updated_at?: string;
         };
         Update: {
+          accepting_checkins?: boolean;
           active?: boolean;
           address?: string | null;
           billing_cadence?: "monthly" | "annual";

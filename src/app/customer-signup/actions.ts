@@ -46,7 +46,7 @@ export async function createGuestTicket(formData: FormData) {
   const supabase = createAdminClient();
   const { data: venue, error: venueError } = await supabase
     .from("venues")
-    .select("id, ticket_expiry_hours")
+    .select("id, ticket_expiry_hours, accepting_checkins")
     .eq("id", venueId)
     .eq("active", true)
     .in("billing_status", ["trialing", "active"])
@@ -54,6 +54,13 @@ export async function createGuestTicket(formData: FormData) {
 
   if (venueError || !venue) {
     fail("Please select an available venue.");
+  }
+
+  // Enforced here as well as in the venue list: a guest holding a stale form or
+  // a pre-shared event QR must not be able to check in after the venue has
+  // paused, so the pause has to hold at the point of creation.
+  if (!venue.accepting_checkins) {
+    fail("This venue has paused check-ins and is not accepting new items right now.");
   }
 
   const { data: contact, error: contactError } = await supabase

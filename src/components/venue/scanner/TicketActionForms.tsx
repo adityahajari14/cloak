@@ -25,6 +25,66 @@ const fieldClass =
 
 // ─── Guest info card ──────────────────────────────────────────────────────────
 
+/**
+ * Where the staff member must physically put the items, shown after activation.
+ *
+ * This is the single most operationally important thing on the screen: the
+ * assigned slot only exists in the app, so if it isn't read and acted on, the
+ * coat goes on the wrong hook and the guest can't get it back. It used to be
+ * buried in a small status line that auto-dismissed after five seconds, which
+ * staff routinely missed — hence the big, persistent treatment here.
+ */
+export function StorageLocationCard({ ticket }: { ticket: ScannerTicket }) {
+  const stored = ticket.items.filter((i) => !i.collected && i.storageLocation);
+
+  // Fall back to the legacy denormalized column for tickets predating per-item
+  // slot rows, so an older ticket still shows something rather than nothing.
+  const legacy =
+    stored.length === 0 && ticket.storageLocation
+      ? ticket.storageLocation
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
+
+  if (stored.length === 0 && legacy.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border-2 border-emerald-500 bg-emerald-50 p-4 sm:p-5">
+      <p className="text-xs font-semibold uppercase tracking-wider text-emerald-800">
+        Put the items here
+      </p>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {stored.length > 0
+          ? stored.map((item) => (
+              <div
+                className="flex items-center gap-2.5 rounded-lg border border-emerald-300 bg-white px-3 py-2.5"
+                key={item.id}
+              >
+                <span className="rounded bg-emerald-600 px-2.5 py-1 font-mono text-base font-bold tabular-nums text-white">
+                  {item.storageLocation}
+                </span>
+                <span className="text-sm font-medium text-foreground">{item.label}</span>
+              </div>
+            ))
+          : legacy.map((slot) => (
+              <span
+                className="rounded bg-emerald-600 px-2.5 py-1 font-mono text-base font-bold tabular-nums text-white"
+                key={slot}
+              >
+                {slot}
+              </span>
+            ))}
+      </div>
+
+      <p className="mt-3 text-xs text-emerald-800">
+        {ticket.guestName} &middot; {ticket.publicCode}
+      </p>
+    </div>
+  );
+}
+
 export function GuestCard({ ticket }: { ticket: ScannerTicket }) {
   const isPending = ticket.status === "pending_activation";
   const isStored = ticket.status === "active";

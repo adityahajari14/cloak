@@ -316,7 +316,7 @@ export async function writeAcceptedScan({
 // A slot stays occupied while the ticket is active, partially collected, or
 // forgotten — a forgotten ticket's items are still physically in the
 // cloakroom until someone actually checks them out.
-const OCCUPYING_STATUSES: TicketRow["status"][] = ["active", "partially_collected", "forgotten"];
+export const OCCUPYING_STATUSES: TicketRow["status"][] = ["active", "partially_collected", "forgotten"];
 
 // Format a raw internal slot (e.g. "h5", "b2") to the display label "H-5" / "B-2".
 export function formatSlot(raw: string): string {
@@ -392,4 +392,53 @@ export async function assignSlots(
   }
 
   return assigned.length === count ? assigned : null;
+}
+
+// ─── Event guest capacity ─────────────────────────────────────────────────────
+
+/**
+ * An event's guest_capacity caps how many guests may be holding items AT ONCE —
+ * live occupancy, not total admissions. A guest who collects everything frees
+ * their slot, so a 300-capacity night can serve far more than 300 people as
+ * they cycle through.
+ *
+ * This is separate from the venue's hanger/bag capacity above: that counts
+ * physical storage slots, this counts guests. One guest occupies one slot no
+ * matter how many items they check in. Both limits must hold.
+ *
+ * A ticket occupies a slot exactly while its items are in the cloakroom — the
+ * same OCCUPYING_STATUSES used for slot assignment, and for the same reason.
+ * A pending ticket (QR issued, nothing handed over) occupies nothing.
+ *
+ * Returns null when the event has room — or has no cap, or the ticket has no
+ * event. Returns the occupancy numbers when it is full.
+ */
+export async function checkEventGuestCapacity(
+  supabase: SupabaseAdmin,
+  eventId: string | null,
+  excludeTicketId?: string,
+): Promise<{ used: number; cap: number } | null> {
+  if (!eventId) return null;
+
+  const { data: event } = await supabase
+    .from("events")
+    .select("guest_capacity")
+    .eq("id", eventId)
+    .maybeSingle();
+
+  const cap = event?.guest_capacity ?? null;
+  if (cap === null) return null; // unlimited
+
+  let query = supabase
+    .from("tickets")
+    .select("id", { count: "exact", head: true })
+    .eq("event_id", eventId)
+    .in("status", OCCUPYING_STATUSES);
+
+  if (excludeTicketId) query = query.neq("id", excludeTicketId);
+
+  const { count } = await query;
+  const used = count ?? 0;
+
+  return used >= cap ? { cap, used } : null;
 }

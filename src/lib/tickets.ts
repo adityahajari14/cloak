@@ -24,6 +24,16 @@ export type PublicTicket = {
   dbId: string;
   email: string;
   expiresAt: string;
+  /**
+   * True when the ticket was opened with its secret token (the QR / emailed
+   * link), false when opened with the short public code.
+   *
+   * The public code is a low-entropy fallback that staff can read aloud, so it
+   * must not unlock the guest's personal details — anyone who guesses one would
+   * otherwise get a real name and phone number. Contact details are masked on a
+   * code-only view; the token view shows them in full.
+   */
+  fullAccess: boolean;
   guestName: string;
   itemCount: number;
   itemDescription: string | null;
@@ -34,6 +44,10 @@ export type PublicTicket = {
   storageLocation: string | null;
   ticketId: string;
   venueAddress: string | null;
+  // Captured when the venue signed up. The map pins these directly — geocoding
+  // the address string instead lands in the wrong place (see VenueLocationMap).
+  venueLatitude: number | null;
+  venueLongitude: number | null;
   venueId: string;
   venueName: string;
 };
@@ -50,6 +64,10 @@ export async function getSelectableVenues(): Promise<PublicVenueOption[]> {
     .from("venues")
     .select("id, name, slug, city, address")
     .eq("active", true)
+    // Manager-controlled pause: the cloakroom is full or the counter is closed,
+    // so the venue drops out of the guest picker without any change to its
+    // account standing (which is what `active` governs).
+    .eq("accepting_checkins", true)
     .in("billing_status", ["trialing", "active"])
     .order("name", { ascending: true });
 
@@ -68,6 +86,35 @@ export async function getSelectableVenues(): Promise<PublicVenueOption[]> {
 
 export function hashTicketToken(token: string) {
   return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+// ─── Masking for code-only lookups ────────────────────────────────────────────
+//
+// A ticket opened by its short public code shows enough for the holder to
+// recognise it as theirs, but not enough to identify a stranger. Someone who
+// guesses a code must not walk away with a real name and phone number.
+
+/** "Aditya Hazari" → "Aditya H." */
+function maskName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "Guest";
+  if (parts.length === 1) return parts[0];
+  return `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.`;
+}
+
+/** "+447700900123" → "•••• ••0123" */
+function maskPhone(phone: string | null): string {
+  const digits = (phone ?? "").replace(/\D/g, "");
+  if (digits.length < 4) return "••••";
+  return `•••• ••${digits.slice(-4)}`;
+}
+
+/** "aditya@example.com" → "a•••••@example.com" */
+function maskEmail(email: string | null): string {
+  const value = (email ?? "").trim();
+  const at = value.indexOf("@");
+  if (at < 1) return "";
+  return `${value[0]}${"•".repeat(Math.max(value.slice(0, at).length - 1, 1))}${value.slice(at)}`;
 }
 
 function normalizeTicketStatus(ticket: {
@@ -105,7 +152,7 @@ async function getTicketByColumn(column: "public_code" | "qr_token_hash", value:
   const [{ data: venue }, { data: itemRows }] = await Promise.all([
     supabase
       .from("venues")
-      .select("name, slug, address, city")
+      .select("name, slug, address, city, postal_code, latitude, longitude")
       .eq("id", data.venue_id)
       .maybeSingle(),
     supabase
@@ -117,14 +164,19 @@ async function getTicketByColumn(column: "public_code" | "qr_token_hash", value:
 
   const status = normalizeTicketStatus(data);
 
+  // Only the secret token proves the holder is the guest. The public code is a
+  // short, human-readable fallback — treat it as an identifier, not a password.
+  const fullAccess = column === "qr_token_hash";
+
   return {
     status: status === "expired" ? ("expired" as const) : ("found" as const),
     ticket: {
       createdAt: data.created_at,
       dbId: data.id,
-      email: data.guest_email ?? "",
+      email: fullAccess ? (data.guest_email ?? "") : maskEmail(data.guest_email),
       expiresAt: data.expires_at,
-      guestName: data.guest_name,
+      fullAccess,
+      guestName: fullAccess ? data.guest_name : maskName(data.guest_name),
       itemCount: data.item_count,
       itemDescription: data.item_description,
       itemType: data.item_type,
@@ -134,11 +186,14 @@ async function getTicketByColumn(column: "public_code" | "qr_token_hash", value:
         storageLocation: r.storage_location ?? null,
         collected: r.collected_at !== null,
       })),
-      mobile: data.guest_phone,
+      mobile: fullAccess ? data.guest_phone : maskPhone(data.guest_phone),
       status,
       storageLocation: data.storage_location,
       ticketId: data.public_code,
-      venueAddress: [venue?.address, venue?.city].filter(Boolean).join(", ") || null,
+      venueAddress:
+        [venue?.address, venue?.city, venue?.postal_code].filter(Boolean).join(", ") || null,
+      venueLatitude: venue?.latitude ?? null,
+      venueLongitude: venue?.longitude ?? null,
       venueId: venue?.slug ?? data.venue_id,
       venueName: venue?.name ?? "Selected venue",
     } satisfies PublicTicket,
@@ -160,7 +215,12 @@ export function createPublicCode() {
     String(date.getUTCMonth() + 1).padStart(2, "0"),
     String(date.getUTCDate()).padStart(2, "0"),
   ].join("");
-  const suffix = crypto.randomBytes(3).toString("hex").toUpperCase();
+  // The date prefix is public, so all the entropy lives in the suffix. 3 bytes
+  // (~16.7M) is small enough to enumerate a night's tickets by brute force;
+  // 5 bytes (~1.1 trillion) is not, and the code is still short enough for
+  // staff to read aloud. Existing shorter codes keep working — this only
+  // affects newly issued ones.
+  const suffix = crypto.randomBytes(5).toString("hex").toUpperCase();
 
   return `CLK-${stamp}-${suffix}`;
 }

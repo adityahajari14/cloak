@@ -107,8 +107,9 @@ export default function PrivacyPolicyPage() {
           <h2>4. How long we keep your data</h2>
           <ul>
             <li>
-              <strong>Guest pass data</strong> — retained for 90 days from the date of the event, then deleted.
-              Anonymised aggregate data (e.g. total items checked in) may be retained indefinitely.
+              <strong>Guest pass data</strong> — retained for as long as necessary to provide the service,
+              resolve disputes, and meet our legal obligations. You may request erasure at any time (see
+              &ldquo;Your rights&rdquo; below).
             </li>
             <li>
               <strong>Venue account data</strong> — retained for the duration of the venue's account, and for 12

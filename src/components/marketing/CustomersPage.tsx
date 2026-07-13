@@ -118,15 +118,24 @@ export default function CustomersPage() {
               <p className="mt-5 max-w-md text-sm leading-7 text-white/70 sm:text-base">
                 Add your permanent Cloak QR ticket to Apple or Google Wallet and use it at any Cloak venue, any time — for free. No paper. No stress.
               </p>
+              {/* The hero sells the permanent wallet pass, so the primary action
+                  is Cloak Club. Checking in for a single visit stays available
+                  for a guest who's standing at a counter right now. */}
               <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                 <Link
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-6 py-3.5 text-sm font-semibold text-zinc-900 shadow-lg transition hover:bg-zinc-100 active:scale-95"
-                  href="/customer-signup"
+                  href="/cloak-club"
                 >
-                  Get my free Cloak pass
+                  Get my free lifetime pass
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                     <path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
+                </Link>
+                <Link
+                  className="inline-flex items-center justify-center rounded-xl border border-white/25 px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-white/10 active:scale-95"
+                  href="/customer-signup"
+                >
+                  Check in for tonight
                 </Link>
               </div>
               <div className="mt-8 flex flex-wrap gap-x-5 gap-y-2">
@@ -205,9 +214,9 @@ export default function CustomersPage() {
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-foreground px-6 py-3.5 text-sm font-semibold text-white transition hover:opacity-85 active:scale-95"
-              href="/customer-signup"
+              href="/cloak-club"
             >
-              Join Cloak — it&apos;s free
+              Join Cloak Club — it&apos;s free
               <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                 <path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
@@ -251,17 +260,25 @@ export default function CustomersPage() {
               Ready to ditch the paper ticket?
             </h2>
             <p className="max-w-md text-base text-white/55">
-              Join Cloak for free. Add your QR pass to your wallet and you&apos;re set — for every event, at every Cloak venue.
+              Join Cloak Club for free. Add your QR pass to your wallet and you&apos;re set — for every event, at every Cloak venue.
             </p>
-            <Link
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-7 py-3.5 text-sm font-semibold text-zinc-900 shadow-lg transition hover:bg-zinc-100 active:scale-95"
-              href="/customer-signup"
-            >
-              Join Cloak — it&apos;s free
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-                <path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </Link>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Link
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-7 py-3.5 text-sm font-semibold text-zinc-900 shadow-lg transition hover:bg-zinc-100 active:scale-95"
+                href="/cloak-club"
+              >
+                Join Cloak Club — it&apos;s free
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                  <path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </Link>
+              <Link
+                className="inline-flex items-center justify-center rounded-xl border border-white/25 px-7 py-3.5 text-sm font-semibold text-white transition hover:bg-white/10 active:scale-95"
+                href="/customer-signup"
+              >
+                Just checking in tonight
+              </Link>
+            </div>
           </div>
         </section>
 

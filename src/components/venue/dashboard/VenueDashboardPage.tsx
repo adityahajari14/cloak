@@ -4,7 +4,7 @@ import PageShell from "@/components/shared/PageShell";
 import Panel from "@/components/shared/Panel";
 import StatusPill from "@/components/shared/StatusPill";
 import type { VenueDashboardData } from "@/lib/venue-dashboard";
-import { deletePendingTicket, endEvent } from "@/app/venuedashboard/actions";
+import { deletePendingTicket, endEvent, startEvent } from "@/app/venuedashboard/actions";
 import ActiveEventBanner from "./ActiveEventBanner";
 import ApprovalBanner from "./ApprovalBanner";
 import LiveDashboardStats, { type LiveCounts } from "./LiveDashboardStats";
@@ -35,12 +35,15 @@ function buildInitialCounts(data: VenueDashboardData, selectedVenueId?: string):
 
   return {
     bagCapacity: venueSource?.bagCapacity ?? 0,
-    bagStored: 0,
+    // Seeded from the server. These used to be hardcoded to 0, so the capacity
+    // bars read "0 / 50 · 50 slots available" on every page load — even with a
+    // full rail — until a realtime event happened to arrive and correct them.
+    bagStored: data.storedByPool.bag,
     capacity: venueSource?.capacity ?? 0,
     collected: get("Collected"),
     forgotten: get("Forgotten"),
     hangerCapacity: venueSource?.hangerCapacity ?? 0,
-    hangerStored: 0,
+    hangerStored: data.storedByPool.hanger,
     pending: get("Pending"),
     stored: get("Stored"),
     today: get("Today"),
@@ -63,9 +66,13 @@ function StaffDashboard({ data }: { data: VenueDashboardData }) {
       }
     >
       <ApprovalBanner />
-      {data.activeEvents.map((e) =>
-        e.startsAt ? <PreEventAlert event={e} key={e.id} /> : null,
-      )}
+      {/* Live events only: starting one is a manager action, so staff get the
+          occupancy readout without the lifecycle controls. */}
+      {data.activeEvents
+        .filter((e) => e.status === "live")
+        .map((e) => (
+          <ActiveEventBanner event={e} key={`live-${e.id}`} onEnd={endEvent} readOnly />
+        ))}
       <LiveDashboardStats
         initialCounts={buildInitialCounts(data)}
         showCapacityBar={false}
@@ -134,12 +141,18 @@ function ManagerDashboard({
       )}
 
       <ApprovalBanner />
-      {data.activeEvents.map((e) =>
-        e.startsAt ? <PreEventAlert event={e} key={`pre-${e.id}`} /> : null,
-      )}
-      {data.activeEvents.map((e) => (
-        <ActiveEventBanner event={e} key={`live-${e.id}`} onEnd={endEvent} />
-      ))}
+      {/* Scheduled and due soon → prompt to open the doors. */}
+      {data.activeEvents
+        .filter((e) => e.status === "scheduled" && e.startsAt)
+        .map((e) => (
+          <PreEventAlert event={e} key={`pre-${e.id}`} onStart={startEvent} />
+        ))}
+      {/* Live → occupancy readout and the single End control. */}
+      {data.activeEvents
+        .filter((e) => e.status === "live")
+        .map((e) => (
+          <ActiveEventBanner event={e} key={`live-${e.id}`} onEnd={endEvent} />
+        ))}
       <LiveDashboardStats
         initialCounts={buildInitialCounts(data, selectedVenueId)}
         showCapacityBar={!isLocked}

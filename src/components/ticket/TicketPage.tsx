@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { createClient } from "@/lib/supabase/client";
+import ShareTicketButton from "./ShareTicketButton";
 import TicketDetails from "./TicketDetails";
 import { useAuth } from "@/components/auth/AuthProvider";
 import type { PublicTicketItem } from "@/lib/tickets";
@@ -15,6 +16,8 @@ export type TicketView = {
   dbId: string;
   email: string;
   expiresAt: string;
+  /** False when opened by short public code — contact details are masked. */
+  fullAccess: boolean;
   guestName: string;
   itemCount: number;
   itemDescription: string | null;
@@ -26,6 +29,8 @@ export type TicketView = {
   storageLocation: string | null;
   ticketId: string;
   venueAddress: string | null;
+  venueLatitude: number | null;
+  venueLongitude: number | null;
   venueId: string;
   venueName: string;
 };
@@ -230,6 +235,14 @@ export default function TicketPage({
         {/* QR card — rendered server-side, passed as a child */}
         {qrCard}
 
+        {/* Share — only while the pass is still usable. */}
+        {!isClosed && (
+          <ShareTicketButton
+            publicCode={ticket.ticketId}
+            ticketUrl={ticket.qrValue}
+            venueName={ticket.venueName}
+          />
+        )}
 
         <TicketDetails ticket={ticket} />
 
@@ -260,6 +273,8 @@ export default function TicketPage({
         {ticket.venueAddress && !isClosed && (
           <VenueLocationMap
             address={ticket.venueAddress}
+            latitude={ticket.venueLatitude}
+            longitude={ticket.venueLongitude}
             venueName={ticket.venueName}
           />
         )}

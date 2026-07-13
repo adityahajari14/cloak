@@ -7,6 +7,7 @@ import {
   type ScannerContext,
   assignSlots,
   canAccessVenue,
+  checkEventGuestCapacity,
   getVenueName,
   isPendingTicketExpired,
   loadTicketById,
@@ -187,6 +188,18 @@ export async function performActivation(
       message: "Add at least one item before activation.",
       status: "ready",
       ticket: toScannerTicket(ticket, venueName, existing),
+    };
+  }
+
+  // This guest is about to start occupying a slot on the event. Check that
+  // before reserving any storage — no point assigning hangers to a guest the
+  // event has no room for. A slot frees whenever a guest collects everything,
+  // so "full" here is a live condition, not a permanent one.
+  const full = await checkEventGuestCapacity(context.supabase, ticket.event_id, ticket.id);
+  if (full) {
+    return {
+      message: `This event is at guest capacity (${full.used}/${full.cap}). Complete a checkout to free a slot.`,
+      status: "error",
     };
   }
 

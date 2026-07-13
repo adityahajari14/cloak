@@ -5,7 +5,14 @@ import { getVenueAnalyticsData } from "@/lib/venue-dashboard";
 
 export const dynamic = "force-dynamic";
 
-export default async function Page() {
+type SearchParams = Promise<{
+  range?: string;
+  from?: string;
+  to?: string;
+  event?: string;
+}>;
+
+export default async function Page({ searchParams }: { searchParams: SearchParams }) {
   const guard = await requireVenueAccess("/venueanalytics");
 
   if (guard.status === "not_configured") {
@@ -17,7 +24,13 @@ export default async function Page() {
     );
   }
 
-  const data = await getVenueAnalyticsData(guard);
+  const params = await searchParams;
+  const data = await getVenueAnalyticsData(guard, {
+    eventId: params.event,
+    from: params.from,
+    range: params.range,
+    to: params.to,
+  });
 
   return <AnalyticsPage data={data} venueOnly />;
 }

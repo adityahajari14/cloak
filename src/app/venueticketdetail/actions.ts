@@ -5,7 +5,7 @@ import { createAdminClient, isSupabaseAdminConfigured } from "@/lib/supabase/adm
 import { requireVenueAccess } from "@/lib/auth/guards";
 import { sendEmail, getSiteUrl } from "@/lib/email";
 import { TicketForgottenEmail } from "@/lib/emails/TicketForgottenEmail";
-import { sendWhatsAppItemsForgotten } from "@/lib/whatsapp";
+import { sendWhatsAppItemsForgotten, sendWhatsAppPassIssued } from "@/lib/whatsapp";
 
 export async function collectItemsFromDetail(
   ticketId: string,
@@ -140,6 +140,63 @@ export async function contactGuestAboutForgottenTicket(
   revalidatePath("/venueticketdetail");
 
   return { ok: true };
+}
+
+/**
+ * Re-send a guest their pass over WhatsApp — for when they've lost the link or
+ * changed phone at the counter. Reuses the cloak_pass_issued template, the same
+ * message they got when they first checked in.
+ *
+ * Logged to ticket_contacts like any other outreach, so the timeline shows that
+ * staff resent it and when.
+ */
+export async function resendPassViaWhatsApp(ticketId: string): Promise<{ ok: boolean; message: string }> {
+  if (!isSupabaseAdminConfigured()) {
+    return { message: "Messaging is not configured.", ok: false };
+  }
+
+  const guard = await requireVenueAccess("/venueticketdetail");
+  if (guard.status !== "authorized") {
+    return { message: "You do not have access to this ticket.", ok: false };
+  }
+
+  const allowedVenueIds = guard.venueRoles.map((r) => r.venueId);
+  const supabase = createAdminClient();
+
+  const { data: ticket } = await supabase
+    .from("tickets")
+    .select("id, venue_id, guest_name, guest_phone, public_code, status")
+    .eq("id", ticketId)
+    .in("venue_id", allowedVenueIds)
+    .maybeSingle();
+
+  if (!ticket) return { message: "Ticket not found.", ok: false };
+  if (!ticket.guest_phone) {
+    return { message: "This guest has no phone number on file.", ok: false };
+  }
+
+  const { data: venue } = await supabase
+    .from("venues")
+    .select("name")
+    .eq("id", ticket.venue_id)
+    .maybeSingle();
+
+  await sendWhatsAppPassIssued({
+    guestName: ticket.guest_name,
+    phone: ticket.guest_phone,
+    publicCode: ticket.public_code,
+    venueName: venue?.name ?? "the venue",
+  });
+
+  await supabase.from("ticket_contacts").insert({
+    channel: "whatsapp",
+    contacted_by: guard.userId,
+    ticket_id: ticketId,
+  });
+
+  revalidatePath("/venueticketdetail");
+
+  return { message: "Pass sent to the guest on WhatsApp.", ok: true };
 }
 
 export async function getTicketContactLog(ticketId: string): Promise<TicketContactLogEntry[]> {

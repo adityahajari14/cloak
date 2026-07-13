@@ -1,11 +1,15 @@
 import AuthStatePage from "@/components/auth/AuthStatePage";
 import PlatformAnalyticsPage from "@/components/admin/PlatformAnalyticsPage";
 import { requirePlatformAdmin } from "@/lib/auth/guards";
-import { getPlatformAnalyticsData, type AnalyticsScope } from "@/lib/platform-analytics";
+import {
+  getPlatformAnalyticsData,
+  normalizeMonthWindow,
+  type AnalyticsScope,
+} from "@/lib/platform-analytics";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = Promise<{ country?: string; venueId?: string }>;
+type SearchParams = Promise<{ country?: string; venueId?: string; months?: string }>;
 
 function resolveScope(params: { country?: string; venueId?: string }): AnalyticsScope {
   if (params.venueId) return { type: "venue", venueId: params.venueId };
@@ -29,7 +33,7 @@ export default async function Page({ searchParams }: { searchParams: SearchParam
 
   const params = await searchParams;
   const scope = resolveScope(params);
-  const data = await getPlatformAnalyticsData(scope);
+  const data = await getPlatformAnalyticsData(scope, normalizeMonthWindow(params.months));
 
   return <PlatformAnalyticsPage data={data} />;
 }

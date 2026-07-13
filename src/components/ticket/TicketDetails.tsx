@@ -26,7 +26,11 @@ export default function TicketDetails({ ticket }: { ticket: TicketView }) {
     <div className="divide-y divide-line rounded-xl border border-line bg-panel px-4">
       <Row label="Venue" value={ticket.venueName} />
       <Row label="Guest" value={ticket.guestName} />
-      <Row label="Mobile" value={ticket.mobile} />
+      {/* The mobile number is only shown to someone holding the secret token.
+          A ticket opened with the short public code shows a masked name and no
+          contact details at all — the code is readable off a screen or guessed,
+          and must not hand a stranger a real phone number. */}
+      {ticket.fullAccess ? <Row label="Mobile" value={ticket.mobile} /> : null}
       <Row label="Issued on" value={formatIssuedAt(ticket.createdAt)} />
     </div>
   );

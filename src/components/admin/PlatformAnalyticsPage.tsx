@@ -72,7 +72,11 @@ export default function PlatformAnalyticsPage({ data }: { data: PlatformAnalytic
       actions={<SecondaryLink href="/masterdashboard">Back to dashboard</SecondaryLink>}
     >
       <div className="flex justify-end">
-        <AnalyticsScopeSelect scope={data.scope} venueOptions={data.venueOptions} />
+        <AnalyticsScopeSelect
+          monthWindow={data.monthWindow}
+          scope={data.scope}
+          venueOptions={data.venueOptions}
+        />
       </div>
 
       {/* ── Revenue ── */}
