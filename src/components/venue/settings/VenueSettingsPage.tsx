@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import {
   changeMyPassword,
   confirmVenueCancellation,
@@ -278,52 +278,82 @@ function CancellationSection({ venue }: { venue: VenueInfo | null }) {
  * staff must still be able to scan. That distinction is why this writes its own
  * `accepting_checkins` column rather than the platform's `active` flag.
  */
+/**
+ * "Venue Active — Accept new check-ins".
+ *
+ * The switch flips immediately and the write happens behind it. Driving the
+ * switch straight off the server prop meant it stayed frozen for the whole
+ * round trip (action → DB → revalidate → re-render), which reads as a dead
+ * button and makes people click it again. If the write fails we snap back and
+ * say why, so the UI never claims a change that didn't land.
+ */
 function AcceptingCheckinsSection({ venue }: { venue: VenueInfo | null }) {
-  const accepting = venue?.acceptingCheckins ?? true;
-  const formRef = useRef<HTMLFormElement | null>(null);
+  const serverValue = venue?.acceptingCheckins ?? true;
+
+  // Holds what we asked the server for. Cleared on failure so the switch snaps
+  // back; on success it already matches the server, so there is nothing to
+  // reconcile — no effect needed.
+  const [optimistic, setOptimistic] = useState<boolean | null>(null);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState("");
+
+  const accepting = optimistic ?? serverValue;
+
+  function handleToggle() {
+    if (!venue?.id || pending) return;
+
+    const next = !accepting;
+    setOptimistic(next);
+    setError("");
+
+    startTransition(async () => {
+      const result = await updateVenueAcceptingCheckins(venue.id, next);
+      if (!result.ok) {
+        setOptimistic(null); // roll back to whatever the server actually has
+        setError(result.message);
+      }
+    });
+  }
 
   return (
     <Panel title="Check-ins">
-      <form action={updateVenueAcceptingCheckins} ref={formRef}>
-        <input name="venueId" type="hidden" value={venue?.id ?? ""} />
-        {/* Submitting the inverse: clicking the toggle flips the current state. */}
-        <input name="acceptingCheckins" type="hidden" value={accepting ? "0" : "1"} />
-
-        <div className="flex items-center justify-between gap-4 rounded-xl bg-zinc-50 px-4 py-3.5">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-foreground">Venue Active</p>
-            <p className="mt-0.5 text-xs text-muted">
-              {accepting
-                ? "Accept new check-ins"
-                : "Paused — guests can still collect stored items"}
-            </p>
-          </div>
-
-          <button
-            aria-checked={accepting}
-            aria-label="Accept new check-ins"
-            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition ${
-              accepting ? "bg-foreground" : "bg-zinc-300"
-            }`}
-            onClick={() => formRef.current?.requestSubmit()}
-            role="switch"
-            type="button"
-          >
-            <span
-              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
-                accepting ? "translate-x-5" : "translate-x-0.5"
-              }`}
-            />
-          </button>
+      <div className="flex items-center justify-between gap-4 rounded-xl bg-zinc-50 px-4 py-3.5">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground">Venue Active</p>
+          <p className="mt-0.5 text-xs text-muted">
+            {accepting ? "Accept new check-ins" : "Paused — guests can still collect stored items"}
+          </p>
         </div>
 
-        {!accepting && (
-          <p className="mt-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
-            This venue is hidden from the guest check-in list and will refuse new passes. Stored
-            items can still be collected as normal.
-          </p>
-        )}
-      </form>
+        <button
+          aria-checked={accepting}
+          aria-label="Accept new check-ins"
+          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 disabled:cursor-not-allowed ${
+            accepting ? "bg-foreground" : "bg-zinc-300"
+          } ${pending ? "opacity-70" : ""}`}
+          disabled={!venue?.id}
+          onClick={handleToggle}
+          role="switch"
+          type="button"
+        >
+          <span
+            className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 ${
+              accepting ? "translate-x-5" : "translate-x-0.5"
+            }`}
+          />
+        </button>
+      </div>
+
+      {error ? (
+        <p className="mt-3 rounded-lg border border-red-100 bg-red-50 px-3 py-2.5 text-xs font-medium text-red-700">
+          {error}
+        </p>
+      ) : !accepting ? (
+        <p className="mt-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
+          This venue is hidden from the guest check-in list and will refuse new passes. Stored items
+          can still be collected as normal.
+        </p>
+      ) : null}
     </Panel>
   );
 }

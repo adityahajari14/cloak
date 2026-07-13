@@ -304,38 +304,58 @@ export async function updateVenueExpiry(formData: FormData) {
  *
  * Pausing does not affect items already stored: guests can still collect, and
  * staff can still scan. It only stops new tickets being created.
+ *
+ * Returns a result rather than redirecting. The other settings forms redirect
+ * with a ?message= param, which forces a full navigation and re-fetch of the
+ * whole settings page — fine for a "Save" button, far too slow for a toggle,
+ * where the switch would sit frozen until the round trip finished and the user
+ * would assume it hadn't worked. The client flips optimistically and only needs
+ * to know whether to roll back.
  */
-export async function updateVenueAcceptingCheckins(formData: FormData) {
+export async function updateVenueAcceptingCheckins(
+  venueId: string,
+  accepting: boolean,
+): Promise<{ ok: boolean; message: string }> {
   const guard = await requireVenueAccess("/venuesettings", ["manager"]);
 
   if (guard.status !== "authorized" || !isSupabaseAdminConfigured()) {
-    fail("Check-in settings are temporarily unavailable.");
+    return { message: "Check-in settings are temporarily unavailable.", ok: false };
   }
 
-  const venueId =
-    readField(formData, "venueId") || guard.venueRoles.find((r) => r.role === "manager")?.venueId;
-  if (!venueId || !guard.venueRoles.some((r) => r.venueId === venueId && r.role === "manager")) {
-    fail("No managed venue was found for this account.");
+  const resolvedId = venueId || guard.venueRoles.find((r) => r.role === "manager")?.venueId;
+  if (
+    !resolvedId ||
+    !guard.venueRoles.some((r) => r.venueId === resolvedId && r.role === "manager")
+  ) {
+    return { message: "No managed venue was found for this account.", ok: false };
   }
-
-  const accepting = readField(formData, "acceptingCheckins") === "1";
 
   const supabase = createAdminClient();
   const { error } = await supabase
     .from("venues")
     .update({ accepting_checkins: accepting })
-    .eq("id", venueId);
+    .eq("id", resolvedId);
 
-  if (error) fail("Could not update check-in settings. Please try again.", venueId);
+  if (error) {
+    return { message: "Could not update check-in settings. Please try again.", ok: false };
+  }
 
-  revalidatePath("/venuesettings");
+  // Deliberately NOT revalidating /venuesettings. That page renders from
+  // getVenueDashboardData() — every ticket, item, scan, staff row and the stale
+  // event sweep — so revalidating it re-runs the entire dashboard query just to
+  // flip one boolean, which is what made this toggle feel broken. The client
+  // already holds the new value optimistically; the surfaces that actually gate
+  // on the flag are the ones that need refreshing.
   revalidatePath("/venuedashboard");
-  finish(
-    accepting
+  revalidatePath("/checkin");
+  revalidatePath("/customer-signup");
+
+  return {
+    message: accepting
       ? "Venue is active — now accepting new check-ins."
       : "Check-ins paused. Guests can still collect stored items.",
-    venueId,
-  );
+    ok: true,
+  };
 }
 
 // ─── Subscription cancellation ─────────────────────────────────────────────────

@@ -519,22 +519,33 @@ async function getVenueMeta(supabase: SupabaseAdmin, venueIds: string[] | null) 
 async function getStaffList(supabase: SupabaseAdmin, venueIds: string[] | null): Promise<VenueStaffMember[]> {
   if (!venueIds || venueIds.length === 0) return [];
 
-  const { data: staffRows } = await supabase
+  // Profiles are embedded rather than fetched in a second pass. This used to be
+  // two sequential round trips, which is a real cost on a slow instance for no
+  // benefit — the FK is right there.
+  const { data } = await supabase
     .from("venue_staff")
-    .select("id, profile_id, role, accepted_at, invited_email")
+    .select("id, profile_id, role, accepted_at, invited_email, profiles(id, full_name, email)")
     .in("venue_id", venueIds)
     .not("profile_id", "is", null)
     .order("accepted_at", { ascending: false });
 
-  if (!staffRows || staffRows.length === 0) return [];
+  const staffRows = (data ?? []) as unknown as Array<{
+    id: string;
+    profile_id: string | null;
+    role: "staff" | "manager";
+    accepted_at: string | null;
+    invited_email: string | null;
+    profiles: { id: string; full_name: string | null; email: string | null } | null;
+  }>;
 
-  const profileIds = staffRows.map((s) => s.profile_id!).filter(Boolean);
-  const { data: profiles } = await supabase
-    .from("profiles")
-    .select("id, full_name, email")
-    .in("id", profileIds);
+  if (staffRows.length === 0) return [];
 
-  const profileMap = new Map((profiles ?? []).map((p) => [p.id, p]));
+  const profileMap = new Map(
+    staffRows
+      .map((s) => (Array.isArray(s.profiles) ? s.profiles[0] : s.profiles))
+      .filter((p): p is { id: string; full_name: string | null; email: string | null } => Boolean(p))
+      .map((p) => [p.id, p]),
+  );
 
   // Deduplicate by profile_id — a person linked to multiple venues appears once.
   // Prefer "manager" role over "staff" when the same person has both.
@@ -616,19 +627,33 @@ export async function getVenueDashboardData({
   async function getActiveEvents(): Promise<ActiveEvent[]> {
     if (!venueIds || venueIds.length === 0) return [];
 
-    // End anything whose scheduled finish has passed, so a forgotten-to-close
-    // event doesn't sit on the dashboard claiming to be live.
-    await closeStaleEvents(venueIds);
-
-    // Scheduled events are included so the dashboard can prompt the manager to
-    // start one that's about to begin; ended ones are done and drop off.
+    // Read first, sweep only if needed. closeStaleEvents used to run
+    // unconditionally ahead of this — a write on every dashboard load, adding a
+    // full round trip (and this Supabase instance answers in 300-2000ms, so
+    // that is felt). Nothing is usually stale, so pay for the sweep only when
+    // something actually is.
     const { data: eventsData } = await supabase
       .from("events")
-      .select("id, name, starts_at, ends_at, status, guest_capacity")
+      .select("id, name, starts_at, ends_at, event_date, status, guest_capacity")
       .in("status", ["scheduled", "live"])
       .in("venue_id", venueIds)
       .order("starts_at", { ascending: true });
     if (!eventsData || eventsData.length === 0) return [];
+
+    // Same staleness rule as closeStaleEvents: past its scheduled end, or (with
+    // no end time) dated before today.
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    const hasStale = eventsData.some(
+      (e) =>
+        e.status === "live" &&
+        (e.ends_at ? new Date(e.ends_at) < now : e.event_date < today),
+    );
+
+    if (hasStale) {
+      await closeStaleEvents(venueIds);
+      return getActiveEvents(); // re-read once, now that the sweep has run
+    }
 
     const eventIds = eventsData.map((e) => e.id);
     const { data: ticketRows } = await supabase

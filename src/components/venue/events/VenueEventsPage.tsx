@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useFormStatus } from "react-dom";
 import QRCode from "qrcode";
 import PageShell from "@/components/shared/PageShell";
 import Panel from "@/components/shared/Panel";
@@ -39,6 +40,37 @@ function toTimeInput(iso: string | null) {
   if (!iso) return "";
   const d = new Date(iso);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/**
+ * A submit button that shows its own pending state, keeping the caller's
+ * styling. The lifecycle actions (start/end/reset) each write to the DB and
+ * revalidate, so without this they sit inert for the whole round trip and read
+ * as broken — the same complaint the Venue Active toggle drew.
+ */
+function ActionSubmit({
+  children,
+  className,
+  pendingLabel,
+  title,
+}: {
+  children: string;
+  className: string;
+  pendingLabel: string;
+  title?: string;
+}) {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      aria-busy={pending}
+      className={`${className} disabled:cursor-wait disabled:opacity-60`}
+      disabled={pending}
+      title={title}
+      type="submit"
+    >
+      {pending ? pendingLabel : children}
+    </button>
+  );
 }
 
 function StatusBadge({ status }: { status: EventStatus }) {
@@ -472,12 +504,12 @@ function EventRow({
         {event.status === "scheduled" && (
           <form action={startEvent}>
             <input name="eventId" type="hidden" value={event.id} />
-            <button
+            <ActionSubmit
               className="rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700"
-              type="submit"
+              pendingLabel="Starting…"
             >
               Start event
-            </button>
+            </ActionSubmit>
           </form>
         )}
 
@@ -491,12 +523,12 @@ function EventRow({
                   ? `${event.guestsOccupying} guest${event.guestsOccupying === 1 ? "" : "s"} still holding items.`
                   : ""}
               </span>
-              <button
+              <ActionSubmit
                 className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100"
-                type="submit"
+                pendingLabel="Ending…"
               >
                 Confirm
-              </button>
+              </ActionSubmit>
               <button
                 className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition hover:text-foreground"
                 onClick={() => setConfirmEnd(false)}
@@ -524,12 +556,12 @@ function EventRow({
               <span className="text-xs text-muted">
                 Reopen{event.guestsOccupying > 0 ? ` and restore ${event.guestsOccupying} ticket${event.guestsOccupying === 1 ? "" : "s"}` : ""}?
               </span>
-              <button
+              <ActionSubmit
                 className="rounded-lg border border-foreground bg-foreground px-2.5 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
-                type="submit"
+                pendingLabel="Restoring…"
               >
                 Confirm
-              </button>
+              </ActionSubmit>
               <button
                 className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition hover:text-foreground"
                 onClick={() => setConfirmReset(false)}
@@ -556,12 +588,12 @@ function EventRow({
             <form action={deleteEvent} className="flex items-center gap-1.5">
               <input name="eventId" type="hidden" value={event.id} />
               <span className="text-xs text-muted">Delete?</span>
-              <button
+              <ActionSubmit
                 className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-100"
-                type="submit"
+                pendingLabel="Deleting…"
               >
                 Yes
-              </button>
+              </ActionSubmit>
               <button
                 className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition hover:text-foreground"
                 onClick={() => setConfirmDelete(false)}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Panel from "@/components/shared/Panel";
 import StatusPill, { type StatusTone } from "@/components/shared/StatusPill";
 import type { DateRange, TicketFilter, VenueDashboardData, VenueTicketListItem } from "@/lib/venue-dashboard";
@@ -75,6 +75,12 @@ export default function TodayTickets({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Every filter/range/search change navigates, which re-runs the whole
+  // dashboard query server-side. Wrapping the navigation in a transition gives
+  // us a real isPending flag — without it the buttons look inert for the entire
+  // round trip and people click them again thinking nothing happened.
+  const [isPending, startTransition] = useTransition();
+
   // Debounce search/filter/dateRange → navigate so the server re-fetches with the right scope
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
@@ -87,7 +93,9 @@ export default function TodayTickets({
         if (customFrom) p.set("from", customFrom);
         if (customTo) p.set("to", customTo);
       }
-      router.replace(`/venuedashboard?${p.toString()}`, { scroll: false });
+      startTransition(() => {
+        router.replace(`/venuedashboard?${p.toString()}`, { scroll: false });
+      });
     }, 300);
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -121,7 +129,17 @@ export default function TodayTickets({
   }
 
   return (
-    <Panel title="Tickets">
+    <Panel
+      title="Tickets"
+      action={
+        isPending ? (
+          <span className="flex items-center gap-1.5 text-xs font-medium text-muted">
+            <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-transparent" />
+            Updating…
+          </span>
+        ) : undefined
+      }
+    >
       {/* Search */}
       <div className="mb-3">
         <input
@@ -207,7 +225,8 @@ export default function TodayTickets({
       )}
       {dateRange !== "custom" && <div className="mb-2" />}
 
-      {/* Ticket list */}
+      {/* Ticket list — dimmed while refreshing so stale rows don't read as current */}
+      <div className={isPending ? "opacity-50 transition-opacity" : "transition-opacity"}>
       {filteredTickets.length === 0 ? (
         <div className="rounded-lg border border-dashed border-line bg-zinc-50 px-4 py-10 text-center">
           <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-zinc-100 text-xl">🎫</div>
@@ -228,6 +247,7 @@ export default function TodayTickets({
           ))}
         </div>
       )}
+      </div>
     </Panel>
   );
 }

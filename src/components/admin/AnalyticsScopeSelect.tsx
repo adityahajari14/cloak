@@ -1,5 +1,6 @@
 "use client";
 
+import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { COUNTRY_FILTER_OPTIONS } from "@/lib/admin-dashboard";
 import { MONTH_WINDOWS, type AnalyticsScope, type MonthWindow } from "@/lib/platform-analytics";
@@ -14,6 +15,9 @@ export default function AnalyticsScopeSelect({
   venueOptions: Array<{ id: string; name: string }>;
 }) {
   const router = useRouter();
+  // Platform analytics aggregates across every venue, so a scope change is a
+  // slow query. Surface that instead of leaving the selects looking dead.
+  const [isPending, startTransition] = useTransition();
 
   const countryValue = scope.type === "country" ? scope.country : "all";
   const venueValue = scope.type === "venue" ? scope.venueId : "";
@@ -28,11 +32,19 @@ export default function AnalyticsScopeSelect({
     if (months !== 12) params.set("months", String(months));
 
     const qs = params.toString();
-    router.push(qs ? `/masterdashboard/analytics?${qs}` : "/masterdashboard/analytics");
+    startTransition(() => {
+      router.push(qs ? `/masterdashboard/analytics?${qs}` : "/masterdashboard/analytics");
+    });
   }
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {isPending && (
+        <span className="flex items-center gap-1.5 text-xs font-medium text-muted">
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-transparent" />
+          Updating…
+        </span>
+      )}
       {/* The trend charts are month-bucketed (MRR, signups, ticket volume), so
           the window is in months — a "last 7 days" view of a monthly series
           would collapse to a single bar. */}
@@ -56,6 +68,7 @@ export default function AnalyticsScopeSelect({
 
       <select
         className="rounded-lg border border-line bg-white px-3 py-2 text-sm font-medium text-foreground outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-foreground/8"
+        disabled={isPending}
         onChange={(e) => goTo({ country: e.target.value })}
         value={scope.type === "venue" ? "all" : countryValue}
       >
@@ -68,6 +81,7 @@ export default function AnalyticsScopeSelect({
 
       <select
         className="min-w-[10rem] rounded-lg border border-line bg-white px-3 py-2 text-sm font-medium text-foreground outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-foreground/8"
+        disabled={isPending}
         onChange={(e) => goTo({ venueId: e.target.value })}
         value={venueValue}
       >
