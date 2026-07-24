@@ -203,25 +203,30 @@ export default function CameraScanner({
       <span key={cls} className={`absolute ${size} ${color} ${cls}`} />
     ));
 
-  const video = (
-    <video
-      aria-label="QR camera preview"
-      className="h-full w-full object-cover"
-      muted
-      playsInline
-      ref={videoRef}
-    />
-  );
-
   return (
     <>
       {/* Hidden canvas used by jsQR fallback */}
       <canvas ref={canvasRef} className="hidden" />
 
-      {/* ── Mobile/tablet: full-viewport camera, matching a native scanner ──── */}
-      <div className="fixed inset-0 z-40 bg-zinc-900 lg:hidden">
-        <div className="relative h-full w-full">
-          {video}
+      {/*
+        One camera subtree, restyled per breakpoint via CSS rather than
+        duplicated into a mobile overlay + a desktop box. A <video> element
+        can only ever be mounted in one place — an earlier version rendered
+        two separate <video> JSX nodes (one per layout) and, because both
+        wrapper divs are simultaneously in the DOM (only one hidden via CSS,
+        Tailwind's `hidden`/`lg:block` never unmounts the other), React could
+        only actually attach the live stream to one of them. Left the camera
+        dark on whichever breakpoint lost that race.
+      */}
+      <div className="fixed inset-0 z-40 bg-zinc-900 lg:static lg:z-auto lg:overflow-hidden lg:rounded-xl lg:border lg:border-line lg:bg-white">
+        <div className="relative h-full w-full lg:aspect-video lg:h-auto">
+          <video
+            aria-label="QR camera preview"
+            className="h-full w-full object-cover"
+            muted
+            playsInline
+            ref={videoRef}
+          />
 
           {!isActive && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-zinc-900 px-6">
@@ -237,7 +242,7 @@ export default function CameraScanner({
                 <p className="text-xs text-white/25">Camera inactive</p>
               )}
               <button
-                className="mt-1 rounded-lg border border-white/20 px-4 py-2 text-xs font-medium text-white/70 transition hover:bg-white/10"
+                className="mt-1 rounded-lg border border-white/20 px-4 py-2 text-xs font-medium text-white/70 transition hover:bg-white/10 lg:hidden"
                 disabled={disabled}
                 onClick={startCamera}
                 type="button"
@@ -249,7 +254,7 @@ export default function CameraScanner({
 
           {status === "scanning" && (
             <>
-              <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center px-6 pt-[max(1rem,env(safe-area-inset-top))]">
+              <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center px-6 pt-[max(1rem,env(safe-area-inset-top))] lg:hidden">
                 <span className="rounded-full bg-black/40 px-4 py-1.5 text-sm font-medium text-white backdrop-blur">
                   Scan the QR code
                 </span>
@@ -262,8 +267,8 @@ export default function CameraScanner({
             </>
           )}
 
-          {/* Exit + fallback actions */}
-          <div className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-3 px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+          {/* Mobile/tablet exit + fallback actions */}
+          <div className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-3 px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] lg:hidden">
             <a
               aria-label="Exit scanner"
               className="flex h-12 w-12 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur transition hover:bg-black/60"
@@ -292,39 +297,9 @@ export default function CameraScanner({
             </div>
           </div>
         </div>
-      </div>
 
-      {/* ── Desktop: embedded camera box alongside the manual-entry form ────── */}
-      <div className="hidden overflow-hidden rounded-xl border border-line bg-white lg:block">
-        <div className="relative aspect-video w-full bg-zinc-900">
-          {video}
-
-          {!isActive && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-zinc-900 px-6">
-              <div className="relative h-32 w-32">
-                {cornerBrackets("h-6 w-6", "border-white/30")}
-                <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold tracking-widest text-white/20 uppercase">
-                  QR
-                </span>
-              </div>
-              {message ? (
-                <p className="text-center text-xs leading-5 text-white/50">{message}</p>
-              ) : (
-                <p className="text-xs text-white/25">Camera inactive</p>
-              )}
-            </div>
-          )}
-
-          {status === "scanning" && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="relative h-48 w-48">
-                {cornerBrackets("h-8 w-8", "border-white")}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center gap-3 px-4 py-3">
+        {/* Desktop-only controls row below the camera box */}
+        <div className="hidden items-center gap-3 px-4 py-3 lg:flex">
           {isActive ? (
             <>
               <span className="flex items-center gap-2 text-xs text-muted">
