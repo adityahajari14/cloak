@@ -47,3 +47,4 @@ pass-cert.csr
 pass.cer
 scripts/gen-apple-secret.mjs
 scripts/grant-wallet-access.mjs
+.docs
