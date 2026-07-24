@@ -50,7 +50,7 @@ export default function VenueScannerPage({
       venueRole={venueRole}
       actions={
         <>
-          <SecondaryLink href="/smsbackup">Phone lookup</SecondaryLink>
+          <SecondaryLink href="/smsbackup">SMS backup</SecondaryLink>
           {venues.length > 1 && (
             <SecondaryLink href="/venuescanner">Switch venue</SecondaryLink>
           )}

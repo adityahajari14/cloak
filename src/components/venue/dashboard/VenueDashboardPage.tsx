@@ -1,8 +1,5 @@
-﻿import Link from "next/link";
-import { PrimaryLink, SecondaryLink } from "@/components/shared/ButtonLink";
+﻿import { PrimaryLink, SecondaryLink } from "@/components/shared/ButtonLink";
 import PageShell from "@/components/shared/PageShell";
-import Panel from "@/components/shared/Panel";
-import StatusPill from "@/components/shared/StatusPill";
 import type { VenueDashboardData } from "@/lib/venue-dashboard";
 import { deletePendingTicket, endEvent, startEvent } from "@/app/venuedashboard/actions";
 import ActiveEventBanner from "./ActiveEventBanner";
@@ -158,45 +155,8 @@ function ManagerDashboard({
         showCapacityBar={!isLocked}
         venueId={activeVenueId}
       />
-      <div className="grid gap-5 xl:grid-cols-[1fr_280px]">
-        <TodayTickets data={data} isManager={true} onDeletePending={deletePendingTicket} />
-        {!isLocked && <StaffRoster staff={data.staff} />}
-      </div>
+      <TodayTickets data={data} isManager={true} onDeletePending={deletePendingTicket} />
     </PageShell>
-  );
-}
-
-function StaffRoster({ staff }: { staff: VenueDashboardData["staff"] }) {
-  return (
-    <Panel title="Staff on roster">
-      {staff.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-line bg-zinc-50 px-4 py-5 text-center text-sm text-muted">
-          No staff accounts yet.{" "}
-          <Link className="font-medium text-brand hover:underline" href="/venuesettings">
-            Add staff
-          </Link>
-        </div>
-      ) : (
-        <div className="divide-y divide-line">
-          {staff.map((member) => (
-            <div className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0" key={member.id}>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-foreground">{member.name}</p>
-                <p className="mt-0.5 truncate text-xs text-muted">{member.email}</p>
-              </div>
-              <StatusPill tone={member.role === "manager" ? "blue" : "neutral"}>
-                {member.role === "manager" ? "Manager" : "Staff"}
-              </StatusPill>
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="mt-4 border-t border-line pt-4">
-        <Link className="text-sm font-medium text-brand hover:underline" href="/venuesettings">
-          Manage staff →
-        </Link>
-      </div>
-    </Panel>
   );
 }
 

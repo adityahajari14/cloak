@@ -3,22 +3,19 @@
 import { startTransition, useState } from "react";
 import type { ScannerTicket } from "@/app/venuescanner/types";
 
-export const PRESET_ITEM_TYPES = [
-  // Hanger pool
-  "Coat",
-  "Jacket",
-  // Bag/shelf pool
-  "Bag",
-  "Backpack",
-  "Luggage",
-  "Helmet",
-  "Electronics",
-  "Sports equipment",
-  "Package",
-];
-
 // Sentinel value for the "Other" free-text option — never saved to DB
 const OTHER_SENTINEL = "__other__";
+
+type ItemCard = { key: string; label: string; icon: string };
+
+const ITEM_CARDS: ItemCard[] = [
+  { key: "Jacket", label: "Jacket", icon: "🧥" },
+  { key: "Bag / Backpack", label: "Bag / Backpack", icon: "🎒" },
+  { key: "Luggage", label: "Luggage", icon: "🧳" },
+  { key: "Umbrella", label: "Umbrella", icon: "☂️" },
+  { key: "Clothing", label: "Clothing", icon: "👕" },
+  { key: OTHER_SENTINEL, label: "Other", icon: "➕" },
+];
 
 const fieldClass =
   "rounded-lg border border-line bg-white px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted focus:border-foreground/30 focus:ring-2 focus:ring-foreground/10 transition";
@@ -117,6 +114,7 @@ export function GuestCard({ ticket }: { ticket: ScannerTicket }) {
       ) : null}
       <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted">
         <span>{ticket.guestPhone}</span>
+        {ticket.guestEmail ? <span className="truncate">{ticket.guestEmail}</span> : null}
         <span>{ticket.venueName}</span>
       </div>
     </div>
@@ -131,6 +129,15 @@ function resolvedType(item: ItemLine): string {
   return item.type === OTHER_SENTINEL ? item.custom.trim() : item.type;
 }
 
+/**
+ * Card-based item picker: tap a card to add one, tap again to bump the count
+ * (only once "Multiple items" is on — otherwise a second tap is a no-op so a
+ * mis-tap can't silently double a guest's coat count). "Other" is the one
+ * card that can't just be a counter, since each one needs its own free-text
+ * name and hanger/shelf pool — so instead of a badge it expands into its own
+ * small list underneath the grid, reusing the same custom/pool fields the
+ * old dropdown's "Other" row used.
+ */
 function ItemEntry({
   items,
   setItems,
@@ -140,110 +147,161 @@ function ItemEntry({
   setItems: React.Dispatch<React.SetStateAction<ItemLine[]>>;
   label: string;
 }) {
-  function addLine() {
-    setItems((prev) => [...prev, { type: "", count: "1", custom: "", pool: "" }]);
+  const [multiple, setMultiple] = useState(false);
+
+  const otherLines = items
+    .map((item, i) => ({ item, i }))
+    .filter(({ item }) => item.type === OTHER_SENTINEL);
+
+  function cardCount(key: string) {
+    const line = items.find((item) => item.type === key);
+    return line ? parseInt(line.count, 10) || 0 : 0;
   }
-  function removeLine(i: number) {
+
+  function tapCard(key: string) {
+    if (key === OTHER_SENTINEL) {
+      setItems((prev) => [...prev, { type: OTHER_SENTINEL, count: "1", custom: "", pool: "" }]);
+      return;
+    }
+    setItems((prev) => {
+      const idx = prev.findIndex((item) => item.type === key);
+      if (idx === -1) return [...prev, { type: key, count: "1", custom: "", pool: "" }];
+      if (!multiple) return prev;
+      return prev.map((item, i) =>
+        i === idx ? { ...item, count: String((parseInt(item.count, 10) || 0) + 1) } : item,
+      );
+    });
+  }
+
+  function decrementCard(key: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    setItems((prev) => {
+      const idx = prev.findIndex((item) => item.type === key);
+      if (idx === -1) return prev;
+      const nextCount = (parseInt(prev[idx].count, 10) || 0) - 1;
+      if (nextCount <= 0) return prev.filter((_, i) => i !== idx);
+      return prev.map((item, i) => (i === idx ? { ...item, count: String(nextCount) } : item));
+    });
+  }
+
+  function removeOtherLine(i: number) {
     setItems((prev) => prev.filter((_, idx) => idx !== i));
   }
-  function updateLine(i: number, patch: Partial<ItemLine>) {
+
+  function updateOtherLine(i: number, patch: Partial<ItemLine>) {
     setItems((prev) => prev.map((item, idx) => (idx === i ? { ...item, ...patch } : item)));
   }
 
   return (
     <div>
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">{label}</p>
-      <div className="space-y-2">
-        {items.map((item, i) => (
-          <div className="flex flex-col gap-1.5" key={i}>
-            <div className="flex items-center gap-2">
-              <select
-                className={`${fieldClass} min-w-0 flex-1`}
-                onChange={(e) => updateLine(i, { type: e.target.value, pool: "" })}
-                required
-                value={item.type}
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted">{label}</p>
+        <label className="flex items-center gap-2 text-xs font-medium text-muted">
+          Multiple items
+          <button
+            aria-checked={multiple}
+            className={`relative h-5 w-9 shrink-0 rounded-full transition ${multiple ? "bg-foreground" : "bg-zinc-200"}`}
+            onClick={() => setMultiple((v) => !v)}
+            role="switch"
+            type="button"
+          >
+            <span
+              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+                multiple ? "translate-x-4" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </label>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        {ITEM_CARDS.map((card) => {
+          const count = card.key === OTHER_SENTINEL ? otherLines.length : cardCount(card.key);
+          const selected = count > 0;
+          return (
+            <div className="relative" key={card.key}>
+              <button
+                className={`flex w-full flex-col items-center gap-1 rounded-xl border px-2 py-3 text-center transition ${
+                  selected
+                    ? "border-foreground bg-zinc-50 ring-1 ring-foreground"
+                    : "border-line bg-white hover:border-foreground/30"
+                }`}
+                onClick={() => tapCard(card.key)}
+                type="button"
               >
-                <option value="" disabled>Item type</option>
-                {PRESET_ITEM_TYPES.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-                <option value={OTHER_SENTINEL}>Other</option>
-              </select>
-
-              <input
-                className={`${fieldClass} w-14 shrink-0 text-center`}
-                inputMode="numeric"
-                maxLength={2}
-                onChange={(e) => {
-                  const digits = e.target.value.replace(/\D/g, "");
-                  if (digits === "") { updateLine(i, { count: "" }); return; }
-                  const n = Math.min(Math.max(parseInt(digits, 10), 1), 99);
-                  updateLine(i, { count: String(n) });
-                }}
-                placeholder="1"
-                type="text"
-                value={item.count}
-              />
-
-              {items.length > 1 && (
+                {count > 1 && (
+                  <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground px-1 text-[10px] font-bold text-white">
+                    +{count}
+                  </span>
+                )}
+                <span className="text-xl">{card.icon}</span>
+                <span className="text-[11px] font-medium leading-tight text-foreground">{card.label}</span>
+              </button>
+              {selected && card.key !== OTHER_SENTINEL && (
                 <button
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line text-muted transition hover:border-foreground/30 hover:text-foreground"
-                  onClick={() => removeLine(i)}
+                  className="absolute -left-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-line bg-white text-xs font-bold text-muted transition hover:border-red-300 hover:text-red-600"
+                  onClick={(e) => decrementCard(card.key, e)}
                   type="button"
                 >
-                  ×
+                  −
                 </button>
               )}
             </div>
+          );
+        })}
+      </div>
 
-            {item.type === OTHER_SENTINEL && (
+      {otherLines.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {otherLines.map(({ item, i }) => (
+            <div className="flex flex-col gap-1.5" key={i}>
               <div className="flex gap-2">
                 <input
                   autoFocus
                   className={`${fieldClass} min-w-0 flex-1`}
-                  onChange={(e) => updateLine(i, { custom: e.target.value })}
+                  onChange={(e) => updateOtherLine(i, { custom: e.target.value })}
                   placeholder="e.g. Pushchair, Scooter, Musical instrument…"
                   type="text"
                   value={item.custom}
                 />
-                <div className="flex shrink-0 overflow-hidden rounded-lg border border-line">
-                  <button
-                    className={`px-3 py-2 text-xs font-semibold transition ${
-                      item.pool === "hanger"
-                        ? "bg-foreground text-white"
-                        : "bg-white text-muted hover:text-foreground"
-                    }`}
-                    onClick={() => updateLine(i, { pool: "hanger" })}
-                    title="Assign to hanger rail"
-                    type="button"
-                  >
-                    Hanger
-                  </button>
-                  <button
-                    className={`border-l border-line px-3 py-2 text-xs font-semibold transition ${
-                      item.pool === "bag"
-                        ? "bg-foreground text-white"
-                        : "bg-white text-muted hover:text-foreground"
-                    }`}
-                    onClick={() => updateLine(i, { pool: "bag" })}
-                    title="Assign to bag/shelf area"
-                    type="button"
-                  >
-                    Shelf
-                  </button>
-                </div>
+                <button
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line text-muted transition hover:border-foreground/30 hover:text-foreground"
+                  onClick={() => removeOtherLine(i)}
+                  type="button"
+                >
+                  ×
+                </button>
               </div>
-            )}
-          </div>
-        ))}
-      </div>
-      <button
-        className="mt-2 text-xs font-medium text-muted hover:text-foreground"
-        onClick={addLine}
-        type="button"
-      >
-        + Add another item
-      </button>
+              <div className="flex shrink-0 overflow-hidden rounded-lg border border-line">
+                <button
+                  className={`flex-1 px-3 py-2 text-xs font-semibold transition ${
+                    item.pool === "hanger"
+                      ? "bg-foreground text-white"
+                      : "bg-white text-muted hover:text-foreground"
+                  }`}
+                  onClick={() => updateOtherLine(i, { pool: "hanger" })}
+                  title="Assign to hanger rail"
+                  type="button"
+                >
+                  Hanger
+                </button>
+                <button
+                  className={`flex-1 border-l border-line px-3 py-2 text-xs font-semibold transition ${
+                    item.pool === "bag"
+                      ? "bg-foreground text-white"
+                      : "bg-white text-muted hover:text-foreground"
+                  }`}
+                  onClick={() => updateOtherLine(i, { pool: "bag" })}
+                  title="Assign to bag/shelf area"
+                  type="button"
+                >
+                  Shelf
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -279,7 +337,7 @@ export function ActivationForm({
   ticket: ScannerTicket;
   venueId?: string;
 }) {
-  const [items, setItems] = useState<ItemLine[]>([{ type: "", count: "1", custom: "", pool: "" }]);
+  const [items, setItems] = useState<ItemLine[]>([]);
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
 
@@ -344,7 +402,7 @@ export function AddItemsForm({
   ticket: ScannerTicket;
   venueId?: string;
 }) {
-  const [items, setItems] = useState<ItemLine[]>([{ type: "", count: "1", custom: "", pool: "" }]);
+  const [items, setItems] = useState<ItemLine[]>([]);
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
 

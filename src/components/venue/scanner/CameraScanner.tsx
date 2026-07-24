@@ -33,9 +33,12 @@ function cameraErrorMessage(error: unknown): string {
 export default function CameraScanner({
   disabled,
   onDetected,
+  onManualEntry,
 }: {
   disabled: boolean;
   onDetected: (value: string) => void;
+  /** Rendered as a "Enter code manually" link in the mobile/tablet full-screen overlay. */
+  onManualEntry?: () => void;
 }) {
   const [message, setMessage] = useState<string | null>(null);
   const [status, setStatus] = useState<CameraStatus>("idle");
@@ -190,90 +193,165 @@ export default function CameraScanner({
 
   const isActive = status === "scanning" || status === "starting";
 
+  const cornerBrackets = (size: string, color: string) =>
+    [
+      "top-0 left-0 border-t-2 border-l-2 rounded-tl",
+      "top-0 right-0 border-t-2 border-r-2 rounded-tr",
+      "bottom-0 left-0 border-b-2 border-l-2 rounded-bl",
+      "bottom-0 right-0 border-b-2 border-r-2 rounded-br",
+    ].map((cls) => (
+      <span key={cls} className={`absolute ${size} ${color} ${cls}`} />
+    ));
+
+  const video = (
+    <video
+      aria-label="QR camera preview"
+      className="h-full w-full object-cover"
+      muted
+      playsInline
+      ref={videoRef}
+    />
+  );
+
   return (
-    <div className="overflow-hidden rounded-xl border border-line bg-white">
+    <>
       {/* Hidden canvas used by jsQR fallback */}
       <canvas ref={canvasRef} className="hidden" />
 
-      {/* Camera viewport */}
-      <div className="relative aspect-video w-full bg-zinc-900">
-        <video
-          aria-label="QR camera preview"
-          className="h-full w-full object-cover"
-          muted
-          playsInline
-          ref={videoRef}
-        />
+      {/* ── Mobile/tablet: full-viewport camera, matching a native scanner ──── */}
+      <div className="fixed inset-0 z-40 bg-zinc-900 lg:hidden">
+        <div className="relative h-full w-full">
+          {video}
 
-        {/* Idle / error overlay */}
-        {!isActive && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-zinc-900 px-6">
-            <div className="relative h-32 w-32">
-              {[
-                "top-0 left-0 border-t-2 border-l-2 rounded-tl",
-                "top-0 right-0 border-t-2 border-r-2 rounded-tr",
-                "bottom-0 left-0 border-b-2 border-l-2 rounded-bl",
-                "bottom-0 right-0 border-b-2 border-r-2 rounded-br",
-              ].map((cls) => (
-                <span key={cls} className={`absolute h-6 w-6 border-white/30 ${cls}`} />
-              ))}
-              <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold tracking-widest text-white/20 uppercase">
-                QR
-              </span>
+          {!isActive && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-zinc-900 px-6">
+              <div className="relative h-32 w-32">
+                {cornerBrackets("h-6 w-6", "border-white/30")}
+                <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold tracking-widest text-white/20 uppercase">
+                  QR
+                </span>
+              </div>
+              {message ? (
+                <p className="text-center text-xs leading-5 text-white/50">{message}</p>
+              ) : (
+                <p className="text-xs text-white/25">Camera inactive</p>
+              )}
+              <button
+                className="mt-1 rounded-lg border border-white/20 px-4 py-2 text-xs font-medium text-white/70 transition hover:bg-white/10"
+                disabled={disabled}
+                onClick={startCamera}
+                type="button"
+              >
+                Retry camera
+              </button>
             </div>
-            {message ? (
-              <p className="text-center text-xs leading-5 text-white/50">{message}</p>
-            ) : (
-              <p className="text-xs text-white/25">Camera inactive</p>
-            )}
-          </div>
-        )}
+          )}
 
-        {/* Scanning crosshair */}
-        {status === "scanning" && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="relative h-48 w-48">
-              {[
-                "top-0 left-0 border-t-2 border-l-2 rounded-tl",
-                "top-0 right-0 border-t-2 border-r-2 rounded-tr",
-                "bottom-0 left-0 border-b-2 border-l-2 rounded-bl",
-                "bottom-0 right-0 border-b-2 border-r-2 rounded-br",
-              ].map((cls) => (
-                <span key={cls} className={`absolute h-8 w-8 border-white ${cls}`} />
-              ))}
+          {status === "scanning" && (
+            <>
+              <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center px-6 pt-[max(1rem,env(safe-area-inset-top))]">
+                <span className="rounded-full bg-black/40 px-4 py-1.5 text-sm font-medium text-white backdrop-blur">
+                  Scan the QR code
+                </span>
+              </div>
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <div className="relative h-48 w-48">
+                  {cornerBrackets("h-8 w-8", "border-white")}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Exit + fallback actions */}
+          <div className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-3 px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+            <a
+              aria-label="Exit scanner"
+              className="flex h-12 w-12 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur transition hover:bg-black/60"
+              href="/venuedashboard"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path d="M6 18L18 6M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </a>
+            <div className="flex items-center gap-4 text-xs font-medium">
+              <a className="text-white/70 underline-offset-2 hover:text-white hover:underline" href="/smsbackup">
+                SMS backup
+              </a>
+              {onManualEntry && (
+                <>
+                  <span className="text-white/30">·</span>
+                  <button
+                    className="text-white/70 underline-offset-2 hover:text-white hover:underline"
+                    onClick={onManualEntry}
+                    type="button"
+                  >
+                    Enter code manually
+                  </button>
+                </>
+              )}
             </div>
           </div>
-        )}
+        </div>
       </div>
 
-      {/* Controls */}
-      <div className="flex items-center gap-3 px-4 py-3">
-        {isActive ? (
-          <>
-            <span className="flex items-center gap-2 text-xs text-muted">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
-              Scanning…
-            </span>
+      {/* ── Desktop: embedded camera box alongside the manual-entry form ────── */}
+      <div className="hidden overflow-hidden rounded-xl border border-line bg-white lg:block">
+        <div className="relative aspect-video w-full bg-zinc-900">
+          {video}
+
+          {!isActive && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-zinc-900 px-6">
+              <div className="relative h-32 w-32">
+                {cornerBrackets("h-6 w-6", "border-white/30")}
+                <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold tracking-widest text-white/20 uppercase">
+                  QR
+                </span>
+              </div>
+              {message ? (
+                <p className="text-center text-xs leading-5 text-white/50">{message}</p>
+              ) : (
+                <p className="text-xs text-white/25">Camera inactive</p>
+              )}
+            </div>
+          )}
+
+          {status === "scanning" && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <div className="relative h-48 w-48">
+                {cornerBrackets("h-8 w-8", "border-white")}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3 px-4 py-3">
+          {isActive ? (
+            <>
+              <span className="flex items-center gap-2 text-xs text-muted">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
+                Scanning…
+              </span>
+              <button
+                className="ml-auto rounded-lg border border-line px-4 py-1.5 text-xs font-medium text-muted transition hover:border-foreground/20 hover:text-foreground"
+                onClick={() => { stopCamera(); setStatus("idle"); setMessage(null); }}
+                type="button"
+              >
+                Stop
+              </button>
+            </>
+          ) : (
             <button
-              className="ml-auto rounded-lg border border-line px-4 py-1.5 text-xs font-medium text-muted transition hover:border-foreground/20 hover:text-foreground"
-              onClick={() => { stopCamera(); setStatus("idle"); setMessage(null); }}
+              className="w-full rounded-lg border border-line py-2.5 text-sm font-medium text-foreground transition hover:bg-zinc-50 disabled:opacity-40"
+              disabled={disabled}
+              onClick={startCamera}
               type="button"
             >
-              Stop
+              Start camera scan
             </button>
-          </>
-        ) : (
-          <button
-            className="w-full rounded-lg border border-line py-2.5 text-sm font-medium text-foreground transition hover:bg-zinc-50 disabled:opacity-40"
-            disabled={disabled}
-            onClick={startCamera}
-            type="button"
-          >
-            Start camera scan
-          </button>
-        )}
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

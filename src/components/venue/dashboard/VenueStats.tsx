@@ -34,16 +34,16 @@ export default function VenueStats({
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
       {stats.map((stat) => (
         <div
-          className="flex flex-col gap-3 rounded-xl border border-line bg-panel px-4 py-4 shadow-sm"
+          className="flex min-w-0 items-center gap-3 rounded-xl border border-line bg-panel px-4 py-3 shadow-sm"
           key={stat.label}
           title={stat.helper}
         >
-          <span className={`flex h-8 w-8 items-center justify-center rounded-lg text-base ${iconBg[stat.tone]}`}>
+          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-base ${iconBg[stat.tone]}`}>
             {labelIcon[stat.label] ?? "·"}
           </span>
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted">{stat.label}</p>
-            <p className={`mt-0.5 text-2xl font-semibold tabular-nums ${toneClass[stat.tone]}`}>
+          <div className="flex min-w-0 items-baseline gap-1.5">
+            <p className="truncate text-xs font-medium uppercase tracking-wide text-muted">{stat.label}</p>
+            <p className={`shrink-0 text-xl font-semibold tabular-nums ${toneClass[stat.tone]}`}>
               {stat.value}
             </p>
           </div>

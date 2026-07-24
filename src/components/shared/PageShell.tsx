@@ -43,7 +43,7 @@ export default function PageShell({
             <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>
           ) : null}
         </div>
-        <div className="grid gap-5">{children}</div>
+        <div className="grid min-w-0 grid-cols-1 gap-5">{children}</div>
       </main>
     </div>
   );

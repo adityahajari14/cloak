@@ -43,6 +43,52 @@ function toTimeInput(iso: string | null) {
 }
 
 /**
+ * Event start/end times are effectively always on the quarter-hour, but the
+ * browser's native `<input type="time">` picker shows every single minute —
+ * `step` only constrains keyboard/validation, not what the picker displays.
+ * A plain `<select>` of 15-minute options sidesteps that entirely.
+ */
+const TIME_OPTIONS = Array.from({ length: 24 * 4 }, (_, i) => {
+  const hours = Math.floor(i / 4);
+  const minutes = (i % 4) * 15;
+  const value = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  const label = new Date(`2000-01-01T${value}`).toLocaleTimeString("en-GB", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+  return { value, label };
+});
+
+/** Nearest 15-minute option at or before the given "HH:MM", so an existing
+ * off-grid time (e.g. from before this change) still shows something sane. */
+function nearestTimeOption(value: string) {
+  if (!value) return "";
+  const [h, m] = value.split(":").map(Number);
+  const rounded = Math.floor(m / 15) * 15;
+  return `${String(h).padStart(2, "0")}:${String(rounded).padStart(2, "0")}`;
+}
+
+function TimeSelect({
+  className,
+  defaultValue,
+  name,
+}: {
+  className: string;
+  defaultValue?: string;
+  name: string;
+}) {
+  return (
+    <select className={className} defaultValue={nearestTimeOption(defaultValue ?? "")} name={name}>
+      <option value="">--:--</option>
+      {TIME_OPTIONS.map((t) => (
+        <option key={t.value} value={t.value}>{t.label}</option>
+      ))}
+    </select>
+  );
+}
+
+/**
  * A submit button that shows its own pending state, keeping the caller's
  * styling. The lifecycle actions (start/end/reset) each write to the DB and
  * revalidate, so without this they sit inert for the whole round trip and read
@@ -316,11 +362,11 @@ function CreateEventForm({ venues }: { venues: Venue[] }) {
           </label>
           <label>
             <span className="mb-1.5 block text-sm font-medium text-foreground">Starts</span>
-            <input className={input} name="startsAt" type="time" />
+            <TimeSelect className={input} name="startsAt" />
           </label>
           <label>
             <span className="mb-1.5 block text-sm font-medium text-foreground">Ends</span>
-            <input className={input} name="endsAt" type="time" />
+            <TimeSelect className={input} name="endsAt" />
           </label>
         </div>
         <label>
@@ -387,11 +433,11 @@ function EditEventForm({ event, onClose }: { event: VenueEvent; onClose: () => v
           </label>
           <label>
             <span className="mb-1.5 block text-sm font-medium text-foreground">Starts</span>
-            <input className={input} defaultValue={toTimeInput(event.startsAt)} name="startsAt" type="time" />
+            <TimeSelect className={input} defaultValue={toTimeInput(event.startsAt)} name="startsAt" />
           </label>
           <label>
             <span className="mb-1.5 block text-sm font-medium text-foreground">Ends</span>
-            <input className={input} defaultValue={toTimeInput(event.endsAt)} name="endsAt" type="time" />
+            <TimeSelect className={input} defaultValue={toTimeInput(event.endsAt)} name="endsAt" />
           </label>
         </div>
         <label>

@@ -30,6 +30,16 @@
   --font-mono: var(--font-geist-mono);
 }
 
+html,
+body {
+  /* Flex/grid children with their own `overflow-x-auto` scroll strips (filter
+     chips, tab rows) can still push their full scrollWidth into the page's
+     scrollWidth on narrow viewports, making the whole page scroll sideways
+     instead of just the strip. Clipping here keeps that scroll contained to
+     the element that declared it. */
+  overflow-x: hidden;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

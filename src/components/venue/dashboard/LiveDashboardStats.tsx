@@ -226,11 +226,15 @@ export default function LiveDashboardStats({
     <>
       <PendingAlert count={counts.pending} />
       <VenueStats stats={buildStats(counts)} />
-      {showHanger && (
-        <CapacityBar label="Hanger slots in use" used={counts.hangerStored} total={counts.hangerCapacity} />
-      )}
-      {showBag && (
-        <CapacityBar label="Bag slots in use" used={counts.bagStored} total={counts.bagCapacity} />
+      {(showHanger || showBag) && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {showHanger && (
+            <CapacityBar label="Hanger slots in use" used={counts.hangerStored} total={counts.hangerCapacity} />
+          )}
+          {showBag && (
+            <CapacityBar label="Bag slots in use" used={counts.bagStored} total={counts.bagCapacity} />
+          )}
+        </div>
       )}
       {showLegacy && (
         <CapacityBar label="Cloak slots in use" used={counts.stored} total={counts.capacity} />

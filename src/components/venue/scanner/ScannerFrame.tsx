@@ -34,6 +34,11 @@ export default function ScannerFrame({ venueId }: { venueId?: string }) {
   const [flashTone, setFlashTone] = useState<"success" | "error" | null>(null);
   const [suggestions, setSuggestions] = useState<PendingTicketSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  // On mobile/tablet the camera takes over the full screen; the manual-entry
+  // form stays mounted underneath (so its state and the suggestions dropdown
+  // keep working) but is only revealed there once staff tap "Enter code
+  // manually" in the overlay. Desktop always shows it alongside the camera.
+  const [manualEntryOpen, setManualEntryOpen] = useState(false);
 
   const successTicket = state.status === "success" && "ticket" in state ? state.ticket : undefined;
   const showsStorage = hasStorageToShow(successTicket);
@@ -143,13 +148,21 @@ export default function ScannerFrame({ venueId }: { venueId?: string }) {
 
           <StorageLocationCard ticket={ticket} />
 
-          <button
-            className="w-full rounded-xl bg-foreground px-6 py-3.5 text-sm font-semibold text-white transition hover:opacity-90"
-            onClick={scanAgain}
-            type="button"
-          >
-            Done — scan next guest
-          </button>
+          <div className="flex gap-3">
+            <a
+              className="flex flex-1 items-center justify-center rounded-xl border border-line bg-white px-6 py-3.5 text-sm font-semibold text-foreground transition hover:bg-zinc-50"
+              href="/venuedashboard"
+            >
+              ← Dashboard
+            </a>
+            <button
+              className="flex-1 rounded-xl bg-foreground px-6 py-3.5 text-sm font-semibold text-white transition hover:opacity-90"
+              onClick={scanAgain}
+              type="button"
+            >
+              Done — scan next guest
+            </button>
+          </div>
         </div>
       ) : ticketReady ? (
         // ── Dedicated ticket screen — fully replaces the camera view ──────────
@@ -179,65 +192,103 @@ export default function ScannerFrame({ venueId }: { venueId?: string }) {
         // ── Scanner screen — camera + code input ──────────────────────────────
         <div className="grid gap-5 lg:grid-cols-2">
           <div className="space-y-4">
-            <CameraScanner disabled={pending} onDetected={handleCameraDetection} />
+            <CameraScanner
+              disabled={pending}
+              onDetected={handleCameraDetection}
+              onManualEntry={() => {
+                setManualEntryOpen(true);
+                setTimeout(() => inputRef.current?.focus(), 0);
+              }}
+            />
 
-            <form action={formAction} className="flex flex-col gap-2 sm:flex-row">
-              <input name="_action" type="hidden" value="lookup" />
-              {venueId && <input name="venueId" type="hidden" value={venueId} />}
-              <div className="relative min-w-0 flex-1">
-                <input
-                  autoCapitalize="characters"
-                  autoComplete="off"
-                  className="w-full rounded-xl border border-line bg-white px-4 py-3.5 text-base font-mono uppercase text-foreground outline-none placeholder:text-muted placeholder:normal-case placeholder:font-sans placeholder:text-sm focus:border-foreground/30 transition"
-                  name="lookupValue"
-                  onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-                  onChange={(e) => handleInputChange(e.target.value)}
-                  onFocus={(e) => { if (e.target.value.trim().length >= 2 && suggestions.length > 0) setShowSuggestions(true); }}
-                  placeholder="Paste QR link or enter CLK-… code"
-                  ref={inputRef}
-                />
-                {showSuggestions && suggestions.length > 0 && (
-                  <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-line bg-white shadow-lg">
-                    {suggestions.map((s) => (
-                      <button
-                        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-zinc-50"
-                        key={s.id}
-                        onMouseDown={() => pickSuggestion(s)}
-                        type="button"
-                      >
-                        <span className="font-mono text-sm font-semibold text-foreground">{s.publicCode}</span>
-                        <span className="text-sm text-muted">{s.guestName}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <button
-                className="rounded-xl bg-foreground px-6 py-3.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
-                disabled={pending}
-                type="submit"
-              >
-                Verify
-              </button>
-            </form>
+            {/* Mobile/tablet: manual entry floats above the full-screen camera as a
+                bottom sheet, only once staff ask for it. Desktop: always shown
+                inline next to the camera box, no overlay behavior. */}
+            {manualEntryOpen && (
+              <div
+                className="fixed inset-0 z-50 bg-black/50 lg:hidden"
+                onClick={() => setManualEntryOpen(false)}
+              />
+            )}
+            <div
+              className={
+                manualEntryOpen
+                  ? "fixed inset-x-0 bottom-0 z-50 space-y-4 rounded-t-2xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl lg:static lg:z-auto lg:rounded-none lg:bg-transparent lg:p-0 lg:shadow-none"
+                  : "hidden space-y-4 lg:block"
+              }
+            >
+              {manualEntryOpen && (
+                <div className="flex items-center justify-between lg:hidden">
+                  <p className="text-sm font-semibold text-foreground">Enter code manually</p>
+                  <button
+                    className="rounded-lg p-1.5 text-muted hover:bg-zinc-100 hover:text-foreground"
+                    onClick={() => setManualEntryOpen(false)}
+                    type="button"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                      <path d="M6 18L18 6M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                </div>
+              )}
+              <form action={formAction} className="flex flex-col gap-2 sm:flex-row">
+                <input name="_action" type="hidden" value="lookup" />
+                {venueId && <input name="venueId" type="hidden" value={venueId} />}
+                <div className="relative min-w-0 flex-1">
+                  <input
+                    autoCapitalize="characters"
+                    autoComplete="off"
+                    className="w-full rounded-xl border border-line bg-white px-4 py-3.5 text-base font-mono uppercase text-foreground outline-none placeholder:text-muted placeholder:normal-case placeholder:font-sans placeholder:text-sm focus:border-foreground/30 transition"
+                    name="lookupValue"
+                    onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                    onChange={(e) => handleInputChange(e.target.value)}
+                    onFocus={(e) => { if (e.target.value.trim().length >= 2 && suggestions.length > 0) setShowSuggestions(true); }}
+                    placeholder="Paste QR link or enter CLK-… code"
+                    ref={inputRef}
+                  />
+                  {showSuggestions && suggestions.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-line bg-white shadow-lg">
+                      {suggestions.map((s) => (
+                        <button
+                          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-zinc-50"
+                          key={s.id}
+                          onMouseDown={() => pickSuggestion(s)}
+                          type="button"
+                        >
+                          <span className="font-mono text-sm font-semibold text-foreground">{s.publicCode}</span>
+                          <span className="text-sm text-muted">{s.guestName}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button
+                  className="rounded-xl bg-foreground px-6 py-3.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                  disabled={pending}
+                  type="submit"
+                >
+                  Verify
+                </button>
+              </form>
 
-            {isError && state.message ? (
-              <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {state.message}
-              </div>
-            ) : null}
-
-            {/* Checkouts only — a storage result takes over the whole view above
-                and waits to be dismissed. */}
-            {isSuccess && state.message ? (
-              <div className="space-y-3">
-                <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              {isError && state.message ? (
+                <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
                   {state.message}
                 </div>
-                {ticket ? <GuestCard ticket={ticket} /> : null}
-                <p className="text-center text-xs text-muted">Scanner resets automatically…</p>
-              </div>
-            ) : null}
+              ) : null}
+
+              {/* Checkouts only — a storage result takes over the whole view above
+                  and waits to be dismissed. */}
+              {isSuccess && state.message ? (
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                    {state.message}
+                  </div>
+                  {ticket ? <GuestCard ticket={ticket} /> : null}
+                  <p className="text-center text-xs text-muted">Scanner resets automatically…</p>
+                </div>
+              ) : null}
+            </div>
           </div>
 
           <div className="hidden rounded-xl border border-line bg-zinc-50 p-6 lg:block">

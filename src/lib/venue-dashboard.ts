@@ -18,6 +18,7 @@ export type VenueTicketListItem = {
   activatedAt: string | null;
   collectedAt: string | null;
   createdAt: string;
+  guestEmail: string;
   guestName: string;
   guestPhone: string;
   id: string;
@@ -698,7 +699,7 @@ export async function getVenueDashboardData({
 
   let ticketQuery = supabase
     .from("tickets")
-    .select("id, public_code, guest_name, guest_phone, status, created_at, activated_at, collected_at, item_type, item_count, storage_location, venue_id")
+    .select("id, public_code, guest_name, guest_email, guest_phone, status, created_at, activated_at, collected_at, item_type, item_count, storage_location, venue_id")
     .order("created_at", { ascending: false })
     .limit(200);
 
@@ -881,6 +882,7 @@ export async function getVenueDashboardData({
           activatedAt: t.activated_at,
           collectedAt: t.collected_at,
           createdAt: t.created_at,
+          guestEmail: t.guest_email ?? "",
           guestName: t.guest_name,
           guestPhone: t.guest_phone,
           id: t.id,

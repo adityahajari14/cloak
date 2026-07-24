@@ -72,18 +72,34 @@ export default function AppHeader({
         ? "/venuedashboard"
         : "/";
 
+  const dashboardHref = mode === "admin" ? "/masterdashboard" : "/venuedashboard";
+  const showBackToDashboard = isWorkspace && activePath !== dashboardHref;
+
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-panel/95 backdrop-blur">
       <div className="mx-auto flex h-14 w-full max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
         {/* Logo */}
-        <Link className="flex shrink-0 items-center gap-2.5" href={logoHref}>
-          <img
-            alt="Cloak"
-            className="h-8 w-8 rounded-lg object-cover"
-            src="/images/cloak-logo.png"
-          />
-          <span className="text-sm font-semibold text-foreground">Cloak</span>
-        </Link>
+        <div className="flex min-w-0 shrink items-center gap-3">
+          <Link className="flex shrink-0 items-center gap-2.5" href={logoHref}>
+            <img
+              alt="Cloak"
+              className="h-8 w-8 rounded-lg object-cover"
+              src="/images/cloak-logo.png"
+            />
+            <span className="hidden text-sm font-semibold text-foreground sm:block">Cloak</span>
+          </Link>
+          {showBackToDashboard && (
+            <Link
+              className="flex shrink-0 items-center gap-1 rounded-md border border-line bg-white px-2.5 py-1.5 text-xs font-medium text-muted transition hover:border-foreground/20 hover:text-foreground sm:text-sm"
+              href={dashboardHref}
+            >
+              <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path d="M15 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span>Dashboard</span>
+            </Link>
+          )}
+        </div>
 
         {/* Desktop nav */}
         {allItems.length > 0 && (

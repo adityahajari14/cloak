@@ -39,6 +39,14 @@ function statusTone(status: VenueTicketListItem["status"]): StatusTone {
   return "danger";
 }
 
+const accentBar: Record<StatusTone, string> = {
+  blue: "bg-zinc-900",
+  green: "bg-emerald-400",
+  warning: "bg-amber-400",
+  danger: "bg-red-400",
+  neutral: "bg-zinc-300",
+};
+
 function fmtTime(value: string) {
   return new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit" }).format(
     new Date(value),
@@ -113,6 +121,7 @@ export default function TodayTickets({
           return (
             t.guestName.toLowerCase().includes(q) ||
             t.guestPhone.toLowerCase().includes(q) ||
+            t.guestEmail.toLowerCase().includes(q) ||
             t.publicCode.toLowerCase().includes(q)
           );
         })
@@ -141,9 +150,19 @@ export default function TodayTickets({
       }
     >
       {/* Search */}
-      <div className="mb-3">
+      <div className="relative mb-3">
+        <svg
+          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          viewBox="0 0 24 24"
+        >
+          <circle cx="11" cy="11" r="7" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="m20 20-3.5-3.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
         <input
-          className="w-full rounded-lg border border-line bg-zinc-50 px-3 py-2 text-sm text-foreground outline-none focus:border-foreground/30 focus:bg-white"
+          className="w-full rounded-lg border border-line bg-zinc-50 py-2 pl-9 pr-3 text-sm text-foreground outline-none focus:border-foreground/30 focus:bg-white"
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by name or phone…"
           value={search}
@@ -151,42 +170,48 @@ export default function TodayTickets({
       </div>
 
       {/* Filter tabs */}
-      <div className="mb-2 flex gap-1 overflow-x-auto pb-1">
-        {filters.map((f) => {
-          const active = activeFilter === f.value;
-          return (
-            <button
-              className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                active
-                  ? "bg-foreground text-white"
-                  : "bg-zinc-100 text-muted hover:bg-zinc-200 hover:text-foreground"
-              }`}
-              key={f.value}
-              onClick={() => changeFilter(f.value)}
-              type="button"
-            >
-              {f.label}
-            </button>
-          );
-        })}
+      <div className="relative mb-2">
+        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+          {filters.map((f) => {
+            const active = activeFilter === f.value;
+            return (
+              <button
+                className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                  active
+                    ? "bg-foreground text-white shadow-sm"
+                    : "bg-zinc-100 text-muted hover:bg-zinc-200 hover:text-foreground"
+                }`}
+                key={f.value}
+                onClick={() => changeFilter(f.value)}
+                type="button"
+              >
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="pointer-events-none absolute right-0 top-0 bottom-1 w-6 bg-linear-to-l from-panel to-transparent sm:hidden" />
       </div>
 
       {/* Date range row */}
-      <div className="mb-2 flex gap-1 overflow-x-auto pb-1">
-        {dateRangeOptions.map((r) => (
-          <button
-            className={`shrink-0 rounded-lg px-2.5 py-1 text-xs transition ${
-              dateRange === r.value
-                ? "bg-zinc-200 font-medium text-foreground"
-                : "text-muted hover:text-foreground"
-            }`}
-            key={r.value}
-            onClick={() => setDateRange(r.value)}
-            type="button"
-          >
-            {r.label}
-          </button>
-        ))}
+      <div className="relative mb-2">
+        <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-none">
+          {dateRangeOptions.map((r) => (
+            <button
+              className={`shrink-0 rounded-lg px-2.5 py-1 text-xs transition ${
+                dateRange === r.value
+                  ? "bg-zinc-200 font-medium text-foreground"
+                  : "text-muted hover:text-foreground"
+              }`}
+              key={r.value}
+              onClick={() => setDateRange(r.value)}
+              type="button"
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+        <div className="pointer-events-none absolute right-0 top-0 bottom-1 w-6 bg-linear-to-l from-panel to-transparent sm:hidden" />
       </div>
 
       {/* Custom date range inputs */}
@@ -236,7 +261,7 @@ export default function TodayTickets({
           <p className="mt-1 text-xs text-muted">Try a different filter or date range.</p>
         </div>
       ) : (
-        <div className="divide-y divide-line overflow-hidden rounded-lg border border-line">
+        <div className="flex flex-col gap-2 sm:gap-0 sm:divide-y sm:divide-line sm:overflow-hidden sm:rounded-lg sm:border sm:border-line">
           {filteredTickets.map((ticket) => (
             <TicketRow
               deletingId={deletingId}
@@ -262,56 +287,59 @@ function TicketRow({
   deletingId: string | null;
 }) {
   const isPending = ticket.status === "pending_activation";
+  const tone = statusTone(ticket.status);
 
   return (
-    <div className="flex items-center gap-3 px-3 py-3 hover:bg-zinc-50 sm:px-4">
-      {/* Left side — name, item, time, mobile */}
-      <a
-        className="min-w-0 flex-1 block"
-        href={`/venueticketdetail?id=${ticket.id}`}
-      >
-        <div className="flex items-center gap-2 flex-wrap">
+    <div className="relative flex overflow-hidden rounded-xl border border-line bg-panel shadow-sm sm:rounded-none sm:border-0 sm:shadow-none sm:hover:bg-zinc-50">
+      <span className={`w-1 shrink-0 sm:hidden ${accentBar[tone]}`} aria-hidden />
+      <div className="flex min-w-0 flex-1 flex-col gap-2.5 px-3 py-3 sm:flex-row sm:items-center sm:gap-3 sm:px-4">
+        {/* Left side — name, item, time, mobile */}
+        <a
+          className="min-w-0 flex-1 block"
+          href={`/venueticketdetail?id=${ticket.id}`}
+        >
           <p className="font-semibold text-sm text-foreground truncate">{ticket.guestName}</p>
-          <StatusPill tone={statusTone(ticket.status)}>{statusLabel(ticket.status)}</StatusPill>
-        </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted">
-          {ticket.itemSummary ? <span>{ticket.itemSummary}</span> : null}
-          <span className="font-mono">{ticket.publicCode}</span>
-          <span>{ticket.guestPhone}</span>
-          <span>{fmtDate(ticket.lastActivityAt)}</span>
-        </div>
-      </a>
-
-      {/* Right side — slot + optional delete */}
-      <div className="flex shrink-0 flex-col items-end gap-1.5">
-        {ticket.slots.length > 0 ? (
-          <div className="flex flex-wrap justify-end gap-1">
-            {ticket.slots.map((slot, i) => (
-              <span
-                className={`rounded px-1.5 py-0.5 font-mono text-xs font-bold ${
-                  slot.collected
-                    ? "bg-zinc-100 text-zinc-400 line-through"
-                    : "bg-foreground text-white"
-                }`}
-                key={`${slot.label}-${i}`}
-              >
-                {slot.label}
-              </span>
-            ))}
+          <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted">
+            {ticket.itemSummary ? <span>{ticket.itemSummary}</span> : null}
+            <span className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] text-zinc-500">{ticket.publicCode}</span>
+            <span>{ticket.guestPhone}</span>
+            {ticket.guestEmail ? <span className="truncate">{ticket.guestEmail}</span> : null}
+            <span>{fmtDate(ticket.lastActivityAt)}</span>
           </div>
-        ) : (
-          <span className="text-xs text-muted">—</span>
-        )}
-        {isPending && onDelete ? (
-          <button
-            className="text-[10px] font-medium text-red-500 hover:text-red-700 disabled:opacity-40"
-            disabled={deletingId === ticket.id}
-            onClick={() => onDelete(ticket.id)}
-            type="button"
-          >
-            {deletingId === ticket.id ? "Deleting…" : "Delete"}
-          </button>
-        ) : null}
+        </a>
+
+        {/* Right side — status, slots, optional delete */}
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-line pt-2.5 sm:flex-col sm:items-end sm:gap-1.5 sm:border-t-0 sm:pt-0">
+          <StatusPill tone={tone}>{statusLabel(ticket.status)}</StatusPill>
+          {ticket.slots.length > 0 ? (
+            <div className="flex flex-wrap gap-1 sm:justify-end">
+              {ticket.slots.map((slot, i) => (
+                <span
+                  className={`rounded px-1.5 py-0.5 font-mono text-xs font-bold ${
+                    slot.collected
+                      ? "bg-zinc-100 text-zinc-400 line-through"
+                      : "bg-foreground text-white"
+                  }`}
+                  key={`${slot.label}-${i}`}
+                >
+                  {slot.label}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <span className="text-xs text-muted">—</span>
+          )}
+          {isPending && onDelete ? (
+            <button
+              className="text-[10px] font-medium text-red-500 hover:text-red-700 disabled:opacity-40"
+              disabled={deletingId === ticket.id}
+              onClick={() => onDelete(ticket.id)}
+              type="button"
+            >
+              {deletingId === ticket.id ? "Deleting…" : "Delete"}
+            </button>
+          ) : null}
+        </div>
       </div>
     </div>
   );
