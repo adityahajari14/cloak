@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import Link from "next/link";
 import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 import { handleScannerAction, searchPendingTickets, type PendingTicketSuggestion } from "@/app/venuescanner/actions";
 import { initialScannerState, type ScannerTicket } from "@/app/venuescanner/types";
@@ -149,12 +150,13 @@ export default function ScannerFrame({ venueId }: { venueId?: string }) {
           <StorageLocationCard ticket={ticket} />
 
           <div className="flex gap-3">
-            <a
-              className="flex flex-1 items-center justify-center rounded-xl border border-line bg-white px-6 py-3.5 text-sm font-semibold text-foreground transition hover:bg-zinc-50"
+            <Link
+              className="flex flex-1 items-center justify-center rounded-xl border border-line bg-white px-6 py-3.5 text-sm font-semibold text-foreground transition active:scale-[0.98] hover:bg-zinc-50"
               href="/venuedashboard"
+              prefetch
             >
               ← Dashboard
-            </a>
+            </Link>
             <button
               className="flex-1 rounded-xl bg-foreground px-6 py-3.5 text-sm font-semibold text-white transition hover:opacity-90"
               onClick={scanAgain}
@@ -191,7 +193,7 @@ export default function ScannerFrame({ venueId }: { venueId?: string }) {
       ) : (
         // ── Scanner screen — camera + code input ──────────────────────────────
         <div className="grid gap-5 lg:grid-cols-2">
-          <div className="space-y-4">
+          <div className="lg:space-y-4">
             <CameraScanner
               disabled={pending}
               onDetected={handleCameraDetection}

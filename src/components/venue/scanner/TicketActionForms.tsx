@@ -130,13 +130,22 @@ function resolvedType(item: ItemLine): string {
 }
 
 /**
- * Card-based item picker: tap a card to add one, tap again to bump the count
- * (only once "Multiple items" is on — otherwise a second tap is a no-op so a
- * mis-tap can't silently double a guest's coat count). "Other" is the one
- * card that can't just be a counter, since each one needs its own free-text
- * name and hanger/shelf pool — so instead of a badge it expands into its own
- * small list underneath the grid, reusing the same custom/pool fields the
- * old dropdown's "Other" row used.
+ * Card-based item picker. Two things staff kept tripping on:
+ *
+ * 1. The count was invisible at quantity 1 (just a highlighted border), and
+ *    the only way to remove one was a tiny unlabeled "−" tucked in a corner
+ *    that only appeared after the fact — nothing told you it was there.
+ *    Selected cards now show a proper − / count / + stepper in place of a
+ *    single tap target, so add and remove are both always visible and
+ *    unambiguous, and the number is never hidden.
+ * 2. With several types selected, there was no way to see the whole order
+ *    without re-scanning all six cards and adding up badges yourself. A
+ *    summary line now lists everything picked so far.
+ *
+ * "Other" is the one card that can't just be a counter, since each one needs
+ * its own free-text name and hanger/shelf pool — so instead of a stepper it
+ * expands into its own small list underneath the grid, reusing the same
+ * custom/pool fields the old dropdown's "Other" row used.
  */
 function ItemEntry({
   items,
@@ -147,18 +156,20 @@ function ItemEntry({
   setItems: React.Dispatch<React.SetStateAction<ItemLine[]>>;
   label: string;
 }) {
-  const [multiple, setMultiple] = useState(false);
-
   const otherLines = items
     .map((item, i) => ({ item, i }))
     .filter(({ item }) => item.type === OTHER_SENTINEL);
+
+  const summary = items
+    .filter((item) => resolvedType(item) && parseInt(item.count, 10) > 0)
+    .map((item) => `${item.count}× ${resolvedType(item)}`);
 
   function cardCount(key: string) {
     const line = items.find((item) => item.type === key);
     return line ? parseInt(line.count, 10) || 0 : 0;
   }
 
-  function tapCard(key: string) {
+  function addCard(key: string) {
     if (key === OTHER_SENTINEL) {
       setItems((prev) => [...prev, { type: OTHER_SENTINEL, count: "1", custom: "", pool: "" }]);
       return;
@@ -166,15 +177,13 @@ function ItemEntry({
     setItems((prev) => {
       const idx = prev.findIndex((item) => item.type === key);
       if (idx === -1) return [...prev, { type: key, count: "1", custom: "", pool: "" }];
-      if (!multiple) return prev;
       return prev.map((item, i) =>
         i === idx ? { ...item, count: String((parseInt(item.count, 10) || 0) + 1) } : item,
       );
     });
   }
 
-  function decrementCard(key: string, e: React.MouseEvent) {
-    e.stopPropagation();
+  function decrementCard(key: string) {
     setItems((prev) => {
       const idx = prev.findIndex((item) => item.type === key);
       if (idx === -1) return prev;
@@ -194,62 +203,66 @@ function ItemEntry({
 
   return (
     <div>
-      <div className="mb-2 flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted">{label}</p>
-        <label className="flex items-center gap-2 text-xs font-medium text-muted">
-          Multiple items
-          <button
-            aria-checked={multiple}
-            className={`relative h-5 w-9 shrink-0 rounded-full transition ${multiple ? "bg-foreground" : "bg-zinc-200"}`}
-            onClick={() => setMultiple((v) => !v)}
-            role="switch"
-            type="button"
-          >
-            <span
-              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
-                multiple ? "translate-x-4" : "translate-x-0.5"
-              }`}
-            />
-          </button>
-        </label>
-      </div>
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">{label}</p>
 
       <div className="grid grid-cols-3 gap-2">
         {ITEM_CARDS.map((card) => {
           const count = card.key === OTHER_SENTINEL ? otherLines.length : cardCount(card.key);
           const selected = count > 0;
-          return (
-            <div className="relative" key={card.key}>
-              <button
-                className={`flex w-full flex-col items-center gap-1 rounded-xl border px-2 py-3 text-center transition ${
-                  selected
-                    ? "border-foreground bg-zinc-50 ring-1 ring-foreground"
-                    : "border-line bg-white hover:border-foreground/30"
-                }`}
-                onClick={() => tapCard(card.key)}
-                type="button"
+
+          // Selected non-"Other" cards swap the tap target for an explicit
+          // stepper — nothing about removing an item stays hidden.
+          if (selected && card.key !== OTHER_SENTINEL) {
+            return (
+              <div
+                className="flex flex-col items-center gap-1.5 rounded-xl border border-foreground bg-zinc-50 px-2 py-2.5 text-center ring-1 ring-foreground"
+                key={card.key}
               >
-                {count > 1 && (
-                  <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground px-1 text-[10px] font-bold text-white">
-                    +{count}
-                  </span>
-                )}
                 <span className="text-xl">{card.icon}</span>
                 <span className="text-[11px] font-medium leading-tight text-foreground">{card.label}</span>
-              </button>
-              {selected && card.key !== OTHER_SENTINEL && (
-                <button
-                  className="absolute -left-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-line bg-white text-xs font-bold text-muted transition hover:border-red-300 hover:text-red-600"
-                  onClick={(e) => decrementCard(card.key, e)}
-                  type="button"
-                >
-                  −
-                </button>
-              )}
-            </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    aria-label={`Remove one ${card.label}`}
+                    className="flex h-6 w-6 items-center justify-center rounded-full border border-line bg-white text-sm font-bold text-muted transition hover:border-red-300 hover:text-red-600"
+                    onClick={() => decrementCard(card.key)}
+                    type="button"
+                  >
+                    −
+                  </button>
+                  <span className="w-4 text-sm font-bold tabular-nums text-foreground">{count}</span>
+                  <button
+                    aria-label={`Add one more ${card.label}`}
+                    className="flex h-6 w-6 items-center justify-center rounded-full border border-line bg-white text-sm font-bold text-muted transition hover:border-foreground/40 hover:text-foreground"
+                    onClick={() => addCard(card.key)}
+                    type="button"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <button
+              className="flex w-full flex-col items-center gap-1 rounded-xl border border-line bg-white px-2 py-3 text-center transition hover:border-foreground/30"
+              key={card.key}
+              onClick={() => addCard(card.key)}
+              type="button"
+            >
+              <span className="text-xl">{card.icon}</span>
+              <span className="text-[11px] font-medium leading-tight text-foreground">{card.label}</span>
+            </button>
           );
         })}
       </div>
+
+      {summary.length > 0 && (
+        <p className="mt-2.5 rounded-lg bg-zinc-50 px-3 py-2 text-xs text-foreground">
+          <span className="font-semibold text-muted">Adding: </span>
+          {summary.join(", ")}
+        </p>
+      )}
 
       {otherLines.length > 0 && (
         <div className="mt-3 space-y-2">

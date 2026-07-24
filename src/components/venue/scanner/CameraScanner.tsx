@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
 
@@ -191,6 +192,21 @@ export default function CameraScanner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Re-arm scanning once the server finishes with a lookup that turned out to
+  // be a dead end (unknown code, wrong venue, already collected). A
+  // successful lookup instead unmounts this whole component — ScannerFrame
+  // switches to the ticket/storage screen — so this only ever fires for the
+  // "try again" case, which is exactly when staff need the camera back
+  // without having to tap Retry themselves.
+  const wasDisabledRef = useRef(disabled);
+  useEffect(() => {
+    if (wasDisabledRef.current && !disabled && status === "idle") {
+      void startCamera();
+    }
+    wasDisabledRef.current = disabled;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [disabled]);
+
   const isActive = status === "scanning" || status === "starting";
 
   const cornerBrackets = (size: string, color: string) =>
@@ -228,28 +244,44 @@ export default function CameraScanner({
             ref={videoRef}
           />
 
-          {!isActive && (
+          {/*
+            A QR gets detected and handed off to the server before the
+            server responds — `disabled` goes true right at that moment,
+            same as it does while manually typing a code in. Without this
+            branch that gap fell through to the generic idle overlay below
+            ("Camera inactive" + a Retry button), which reads as the scan
+            having failed when it actually succeeded and is just waiting on
+            the network.
+          */}
+          {disabled ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-zinc-900 px-6">
-              <div className="relative h-32 w-32">
-                {cornerBrackets("h-6 w-6", "border-white/30")}
-                <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold tracking-widest text-white/20 uppercase">
-                  QR
-                </span>
-              </div>
-              {message ? (
-                <p className="text-center text-xs leading-5 text-white/50">{message}</p>
-              ) : (
-                <p className="text-xs text-white/25">Camera inactive</p>
-              )}
-              <button
-                className="mt-1 rounded-lg border border-white/20 px-4 py-2 text-xs font-medium text-white/70 transition hover:bg-white/10 lg:hidden"
-                disabled={disabled}
-                onClick={startCamera}
-                type="button"
-              >
-                Retry camera
-              </button>
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+              <p className="text-xs text-white/60">Processing…</p>
             </div>
+          ) : (
+            !isActive && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-zinc-900 px-6">
+                <div className="relative h-32 w-32">
+                  {cornerBrackets("h-6 w-6", "border-white/30")}
+                  <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold tracking-widest text-white/20 uppercase">
+                    QR
+                  </span>
+                </div>
+                {message ? (
+                  <p className="text-center text-xs leading-5 text-white/50">{message}</p>
+                ) : (
+                  <p className="text-xs text-white/25">Camera inactive</p>
+                )}
+                <button
+                  className="mt-1 rounded-lg border border-white/20 px-4 py-2 text-xs font-medium text-white/70 transition hover:bg-white/10 lg:hidden"
+                  disabled={disabled}
+                  onClick={startCamera}
+                  type="button"
+                >
+                  Retry camera
+                </button>
+              </div>
+            )
           )}
 
           {status === "scanning" && (
@@ -269,19 +301,26 @@ export default function CameraScanner({
 
           {/* Mobile/tablet exit + fallback actions */}
           <div className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-3 px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] lg:hidden">
-            <a
+            <Link
               aria-label="Exit scanner"
-              className="flex h-12 w-12 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur transition hover:bg-black/60"
+              className="flex h-12 w-12 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur transition active:scale-90 active:bg-black/70 hover:bg-black/60"
               href="/venuedashboard"
+              onClick={stopCamera}
+              prefetch
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                 <path d="M6 18L18 6M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-            </a>
+            </Link>
             <div className="flex items-center gap-4 text-xs font-medium">
-              <a className="text-white/70 underline-offset-2 hover:text-white hover:underline" href="/smsbackup">
+              <Link
+                className="text-white/70 underline-offset-2 hover:text-white hover:underline"
+                href="/smsbackup"
+                onClick={stopCamera}
+                prefetch
+              >
                 SMS backup
-              </a>
+              </Link>
               {onManualEntry && (
                 <>
                   <span className="text-white/30">·</span>
